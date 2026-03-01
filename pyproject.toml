@@ -54,6 +54,9 @@ notebook = [
     "ipywidgets",
     "plotly",
 ]
+speedups = [
+    "numba>=0.60",
+]
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -109,6 +112,7 @@ python = "3.11.*"
 numpy = "*"
 numpy-stl = "*"
 matplotlib = "*"
+numba = "*"
 jupyterlab = "*"
 ipywidgets = "*"
 plotly = "*"
@@ -126,8 +130,8 @@ ruff = "*"
 twine = "*"
 
 [tool.pixi.environments]
-default = { features = ["notebook"] }
-dev = { features = ["dev", "notebook"] }
+default = { features = ["notebook", "speedups"] }
+dev = { features = ["dev", "notebook", "speedups"] }
 
 # ------------------------
 # Pixi Tasks (DevOps)

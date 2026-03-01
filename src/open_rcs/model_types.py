@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 import numpy as np
 
-from enum import Enum
 
 class RadarBand(Enum):
     """IEEE Standard Letter Designations for Radar-Frequency Bands (GHz)."""
@@ -27,7 +27,7 @@ class RadarBand(Enum):
     @property
     def min_freq(self) -> float:
         return self.value[0]
-    
+
     @property
     def center_freq(self) -> float:
         return 0.5 * sum(self.value)
@@ -35,7 +35,7 @@ class RadarBand(Enum):
     @property
     def max_freq(self) -> float:
         return self.value[1]
-    
+
     @classmethod
     def to_string_list(cls) -> list[str]:
         """Returns a list of strings formatted as 'NAME: MIN-MAX GHz'."""

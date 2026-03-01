@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import warnings
 from collections.abc import Callable
 
@@ -98,6 +99,14 @@ def simulate_bistatic(
         surface_beta_angles,
         geometry_data.vertex_indices,
     )
+    transform_z_all, transform_y_all = rf.precompute_rotation_matrices(
+        surface_alpha_angles,
+        surface_beta_angles,
+    )
+    phase_p_vectors, phase_q_vectors, phase_origin_vectors = rf.precompute_phase_geometry(
+        geometry_data.vertex_coordinates,
+        geometry_data.vertex_indices,
+    )
     (
         phi_grid_deg,
         theta_grid_deg,
@@ -133,6 +142,8 @@ def simulate_bistatic(
 
     for phi_index, phi_deg in enumerate(phi_values_deg):
         phi_radians = phi_deg * radian_factor
+        sine_phi = math.sin(phi_radians)
+        cosine_phi = math.cos(phi_radians)
         for theta_index, theta_deg in enumerate(theta_values_deg):
             theta_radians = theta_deg * radian_factor
             phi_grid_deg[phi_index, theta_index] = phi_deg
@@ -162,10 +173,16 @@ def simulate_bistatic(
             accumulated_fields = FieldAccumulator()
             for triangle_index in range(int(geometry_data.n_triangles)):
                 incident_normal_dot = float(
-                    np.dot(surface_normals[triangle_index, :], np.transpose(incident_direction_unit_vector))
+                    np.dot(
+                        surface_normals[triangle_index, :],
+                        np.transpose(incident_direction_unit_vector),
+                    )
                 )
                 if geometry_data.illumination_flag_mode == 0 and not (
-                    ((geometry_data.illumination_flags[triangle_index] == 1 and incident_normal_dot >= 0))
+                    (
+                        geometry_data.illumination_flags[triangle_index] == 1
+                        and incident_normal_dot >= 0
+                    )
                     or geometry_data.illumination_flags[triangle_index] == 0
                 ):
                     continue
@@ -176,9 +193,9 @@ def simulate_bistatic(
                     incident_local_w,
                     transform_z,
                     transform_y,
-                ) = rf.direction_cosines(
-                    surface_alpha_angles,
-                    surface_beta_angles,
+                ) = rf.direction_cosines_from_precomputed(
+                    transform_z_all,
+                    transform_y_all,
                     incident_direction_vector,
                     triangle_index,
                 )
@@ -197,9 +214,9 @@ def simulate_bistatic(
                     observation_local_w,
                     transform_z,
                     transform_y,
-                ) = rf.direction_cosines(
-                    surface_alpha_angles,
-                    surface_beta_angles,
+                ) = rf.direction_cosines_from_precomputed(
+                    transform_z_all,
+                    transform_y_all,
                     observation_direction_vector,
                     triangle_index,
                 )
@@ -208,20 +225,19 @@ def simulate_bistatic(
                     _observation_local_phi,
                     _obs_cp,
                     _obs_sp,
-                    _obs_st,
-                    _obs_ct,
+                    observation_local_sine_theta,
+                    observation_local_cosine_theta,
                 ) = rf.bi_spherical_angles(
                     observation_local_u,
                     observation_local_v,
                     observation_local_w,
                 )
 
-                phase_p, phase_q, phase_origin = rf.bi_phase_vertex_triangle(
-                    geometry_data.x,
-                    geometry_data.y,
-                    geometry_data.z,
-                    geometry_data.vertex_indices,
+                phase_p, phase_q, phase_origin = rf.bi_phase_vertex_triangle_precomputed(
                     wave_number,
+                    phase_p_vectors,
+                    phase_q_vectors,
+                    phase_origin_vectors,
                     triangle_index,
                     observation_direction_u,
                     observation_direction_v,
@@ -230,14 +246,29 @@ def simulate_bistatic(
                     incident_direction_v,
                     incident_direction_w,
                 )
-                local_field_step_1 = np.dot(transform_z, np.transpose(incident_field_cartesian))
-                local_field_components = np.dot(transform_y, local_field_step_1)
-                local_theta_field, local_phi_field = rf.bi_incident_field_spherical_coordinates(
-                    cosine_local_incident_phi,
-                    cosine_local_incident_theta,
-                    sine_local_incident_theta,
-                    sine_local_incident_phi,
-                    local_field_components,
+                cosine_alpha = float(transform_z[0, 0])
+                sine_alpha = float(transform_z[0, 1])
+                cosine_beta = float(transform_y[0, 0])
+                sine_beta = float(transform_y[2, 0])
+                rotated_x = (
+                    cosine_alpha * incident_field_cartesian[0]
+                    + sine_alpha * incident_field_cartesian[1]
+                )
+                rotated_y = (
+                    -sine_alpha * incident_field_cartesian[0]
+                    + cosine_alpha * incident_field_cartesian[1]
+                )
+                local_field_x = cosine_beta * rotated_x - sine_beta * incident_field_cartesian[2]
+                local_field_y = rotated_y
+                local_field_z = sine_beta * rotated_x + cosine_beta * incident_field_cartesian[2]
+                local_theta_field = (
+                    local_field_x * cosine_local_incident_theta * cosine_local_incident_phi
+                    + local_field_y * cosine_local_incident_theta * sine_local_incident_phi
+                    - local_field_z * sine_local_incident_theta
+                )
+                local_phi_field = (
+                    -local_field_x * sine_local_incident_phi
+                    + local_field_y * cosine_local_incident_phi
                 )
 
                 reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
@@ -250,6 +281,7 @@ def simulate_bistatic(
                     surface_beta_angles[triangle_index],
                     simulation_config.frequency_hz,
                     material_entries,
+                    local_cos_theta=observation_local_cosine_theta,
                 )
                 local_surface_current_x = (
                     -local_theta_field * cosine_local_incident_phi * reflection_parallel
@@ -266,25 +298,14 @@ def simulate_bistatic(
                     * cosine_local_incident_theta
                 )
 
-                phase_difference, exp_phase_origin, exp_phase_p, exp_phase_q = rf.area_integral(
-                    phase_q,
-                    phase_p,
-                    phase_origin,
-                )
                 area_integral_value = rf.calculate_ic(
                     phase_p,
                     phase_q,
                     phase_origin,
-                    surface_normals,
                     taylor_terms,
-                    triangle_areas,
-                    exp_phase_origin,
+                    float(triangle_areas[triangle_index]),
                     incident_amplitude,
                     taylor_threshold,
-                    phase_difference,
-                    exp_phase_q,
-                    triangle_index,
-                    exp_phase_p,
                 )
                 (
                     accumulated_fields.theta_component,
@@ -292,22 +313,23 @@ def simulate_bistatic(
                     accumulated_fields.diffuse_phi,
                     accumulated_fields.diffuse_theta,
                 ) = rf.calculate_fields(
-                    triangle_areas,
+                    float(triangle_areas[triangle_index]),
                     roughness_factor_secondary,
                     normalized_correlation_distance,
-                    observation_local_theta,
+                    observation_local_sine_theta,
+                    observation_local_cosine_theta,
                     wavelength_m,
                     local_surface_current_y,
                     area_integral_value,
                     theta_projection_u,
                     theta_projection_v,
                     theta_projection_w,
-                    phi_radians,
+                    sine_phi,
+                    cosine_phi,
                     accumulated_fields.theta_component,
                     accumulated_fields.phi_component,
                     accumulated_fields.diffuse_theta,
                     accumulated_fields.diffuse_phi,
-                    triangle_index,
                     local_surface_current_x,
                     transform_z,
                     transform_y,
@@ -352,7 +374,9 @@ def run_bistatic(
 ) -> SolverResult:
     """Run bistatic simulation and persist standard artifacts to disk."""
     simulation_result = simulate_bistatic(simulation_config, geometry_data)
-    rcs_max_db, rcs_min_db = rf.plot_limits(simulation_result.rcs_theta_db, simulation_result.rcs_phi_db)
+    rcs_max_db, rcs_min_db = rf.plot_limits(
+        simulation_result.rcs_theta_db, simulation_result.rcs_phi_db
+    )
     polarization_label = rf.get_polarization(simulation_config.incident_polarization)[0]
 
     rf.set_font_option()

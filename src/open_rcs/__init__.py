@@ -11,6 +11,7 @@ from .model_types import (
     SolverResult,
 )
 from .notebook_ui import build_plotly_figures, launch_rcs_widget
+from .profiling import ProfileReport, profile_bistatic, profile_monostatic
 from .rcs_bistatic import run_bistatic, simulate_bistatic
 from .rcs_functions import build_geometry_from_stl, extract_coordinates_data, get_params_from_file
 from .rcs_monostatic import run_monostatic, simulate_monostatic
@@ -35,4 +36,7 @@ __all__ = [
     "run_bistatic",
     "build_plotly_figures",
     "launch_rcs_widget",
+    "ProfileReport",
+    "profile_monostatic",
+    "profile_bistatic",
 ]

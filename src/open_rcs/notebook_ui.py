@@ -16,8 +16,8 @@ from .model_types import (
     GeometryData,
     MaterialConfig,
     MonostaticSimulationConfig,
-    RcsComputationResult,
     RadarBand,
+    RcsComputationResult,
 )
 from .rcs_bistatic import simulate_bistatic
 from .rcs_monostatic import simulate_monostatic
@@ -63,7 +63,9 @@ def _rotation_matrix_xyz(roll_deg: float, pitch_deg: float, yaw_deg: float) -> n
     return rot_z @ rot_y @ rot_x
 
 
-def _rotate_vertices(vertices: np.ndarray, roll_deg: float, pitch_deg: float, yaw_deg: float) -> np.ndarray:
+def _rotate_vertices(
+    vertices: np.ndarray, roll_deg: float, pitch_deg: float, yaw_deg: float
+) -> np.ndarray:
     """Rotate vertices around the mesh centroid."""
     if vertices.size == 0:
         return vertices
@@ -153,7 +155,11 @@ def _build_2d_cut(
         return angle_values, simulation_result.rcs_theta_db[0], simulation_result.rcs_phi_db[0]
     if theta_count == 1:
         angle_values = simulation_result.phi_grid_deg[:, 0]
-        return angle_values, simulation_result.rcs_theta_db[:, 0], simulation_result.rcs_phi_db[:, 0]
+        return (
+            angle_values,
+            simulation_result.rcs_theta_db[:, 0],
+            simulation_result.rcs_phi_db[:, 0],
+        )
 
     mid_phi_index = phi_count // 2
     angle_values = simulation_result.theta_grid_deg[mid_phi_index]
@@ -243,16 +249,24 @@ def build_plotly_figures(
             rcs_theta_cut,
             rcs_phi_cut,
         )
-        fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"))
-        fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi"))
+        fig_2d.add_trace(
+            go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta")
+        )
+        fig_2d.add_trace(
+            go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi")
+        )
         fig_2d.update_layout(
             title="RCS Cut (Polar)",
             polar=dict(angularaxis=dict(direction="counterclockwise", rotation=90)),
         )
     else:
-        fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta"))
+        fig_2d.add_trace(
+            go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta")
+        )
         fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi"))
-        fig_2d.update_layout(title="RCS Cut (X-Y)", xaxis_title="Angle (deg)", yaxis_title="RCS (dBsm)")
+        fig_2d.update_layout(
+            title="RCS Cut (X-Y)", xaxis_title="Angle (deg)", yaxis_title="RCS (dBsm)"
+        )
 
     if mesh_vertices is None or mesh_faces is None:
         mesh_vertices, mesh_faces = _load_mesh_vertices_faces(Path(stl_model_path))
@@ -360,7 +374,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
         description="Model:",
         tooltip="STL model used for geometry and visualization.",
     )
-    radar_bands = '\n'.join(RadarBand.to_string_list())
+    radar_bands = "\n".join(["", "Radar Bands:", *RadarBand.to_string_list()])
     freq_widget = widgets.FloatText(
         value=10.0,
         description="Freq GHz:",
@@ -373,14 +387,14 @@ def launch_rcs_widget(project_root: str | Path = "."):
     )
     std_widget = widgets.FloatText(
         value=0.0,
-        description="Surface Roughness:",
+        description="Surf. Rough.:",
         tooltip="Surface roughness standard deviation (meters).",
     )
     pol_widget = widgets.Dropdown(
         options=[("TM-z", 0), ("TE-z", 1)],
         value=0,
-        description="Pol:",
-        tooltip="Incident wave polarization.",
+        description="Polarization:",
+        tooltip="Incident wave polarization.\nTM-z: Theta Polarization\nTE-z: Phi Polarization",
     )
     use_material_file_widget = widgets.Checkbox(
         value=bool(material_options),
@@ -471,8 +485,8 @@ def launch_rcs_widget(project_root: str | Path = "."):
     )
 
     chart_mode_widget = widgets.ToggleButtons(
-        options=[("X-Y", "xy"), ("Polar", "polar")],
-        value="xy",
+        options=[("Polar", "polar"), ("X-Y", "xy")],
+        value="polar",
         description="2D:",
         tooltip="Select Cartesian or polar RCS cut plot.",
     )
@@ -570,7 +584,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
             "<b>Sweep Info:</b> "
             f"phi samples={phi_samples}, theta samples={theta_samples}, "
             f"total angles={total_samples}, "
-            f"triangle-angle evaluations≈{interaction_count:,}"
+            f"triangle-angle evaluations~={interaction_count:,}"
         )
         progress_bar.max = float(max(1, total_samples))
         if progress_bar.value > progress_bar.max:
@@ -722,7 +736,11 @@ def launch_rcs_widget(project_root: str | Path = "."):
             use_material_file = bool(use_material_file_widget.value) and bool(material_options)
             material = MaterialConfig(
                 resistivity_mode=float(rf.MATERIALESPECIFICO if use_material_file else 0),
-                material_path=str(material_file_widget.value if use_material_file else (project_path / "matrl.txt")),
+                material_path=str(
+                    material_file_widget.value
+                    if use_material_file
+                    else (project_path / "matrl.txt")
+                ),
             )
 
             progress_text_widget.value = "<span>Building geometry...</span>"
@@ -822,15 +840,25 @@ def launch_rcs_widget(project_root: str | Path = "."):
                     rcs_theta_cut,
                     rcs_phi_cut,
                 )
-                fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"))
-                fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi"))
+                fig_2d.add_trace(
+                    go.Scatterpolar(
+                        theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"
+                    )
+                )
+                fig_2d.add_trace(
+                    go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi")
+                )
                 fig_2d.update_layout(
                     title="RCS Cut (Polar)",
                     polar=dict(angularaxis=dict(direction="counterclockwise", rotation=90)),
                 )
             else:
-                fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta"))
-                fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi"))
+                fig_2d.add_trace(
+                    go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta")
+                )
+                fig_2d.add_trace(
+                    go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi")
+                )
                 fig_2d.update_layout(
                     title="RCS Cut (X-Y)",
                     xaxis_title="Angle (deg)",
