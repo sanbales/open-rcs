@@ -8,6 +8,14 @@ import numpy as np
 from .constants import RESULTS_DIR, FontSize
 
 
+def _expanded_limits(min_value: float, max_value: float) -> tuple[float, float]:
+    """Expand degenerate axis limits to avoid singular matplotlib transforms."""
+    if np.isclose(min_value, max_value):
+        padding = max(0.5, abs(min_value) * 0.01)
+        return min_value - padding, max_value + padding
+    return min_value, max_value
+
+
 def set_font_option(
     font_size: int = int(FontSize.SMALL),
     axes_title: int = int(FontSize.MEDIUM),
@@ -100,6 +108,11 @@ def final_plot(
     mode: str,
 ) -> str:
     if phi_sample_count == 1:
+        x_min, x_max = _expanded_limits(
+            float(np.min(theta_grid_deg)),
+            float(np.max(theta_grid_deg)),
+        )
+        y_min, y_max = _expanded_limits(float(rcs_min_db), float(rcs_max_db))
         plt.figure(1)
         plt.suptitle(f"RCS Simulation IR Signature - {mode}")
         plt.title(
@@ -110,10 +123,10 @@ def final_plot(
         plt.ylabel("RCS (dBsm)")
         plt.axis(
             (
-                float(np.min(theta_grid_deg)),
-                float(np.max(theta_grid_deg)),
-                float(rcs_min_db),
-                float(rcs_max_db),
+                x_min,
+                x_max,
+                y_min,
+                y_max,
             )
         )
         plt.plot(theta_grid_deg[0], rcs_theta_db[0])
@@ -121,6 +134,11 @@ def final_plot(
         plt.grid(True)
 
     if theta_sample_count == 1:
+        x_min, x_max = _expanded_limits(
+            float(np.min(phi_grid_deg)),
+            float(np.max(phi_grid_deg)),
+        )
+        y_min, y_max = _expanded_limits(float(rcs_min_db), float(rcs_max_db))
         plt.figure(1)
         plt.suptitle(f"RCS Simulation IR Signature - {mode}")
         plt.title(
@@ -131,10 +149,10 @@ def final_plot(
         plt.ylabel("RCS (dBsm)")
         plt.axis(
             (
-                float(np.min(phi_grid_deg)),
-                float(np.max(phi_grid_deg)),
-                float(rcs_min_db),
-                float(rcs_max_db),
+                x_min,
+                x_max,
+                y_min,
+                y_max,
             )
         )
         plt.plot(phi_grid_deg, rcs_theta_db)
