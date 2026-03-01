@@ -26,7 +26,7 @@ def simulate_monostatic(
 ) -> RcsComputationResult:
     """Run monostatic simulation and return in-memory arrays (no disk output)."""
     material_entries: list = []
-    use_material_lookup = simulation_config.material.resistivity_mode == rf.MATERIALESPECIFICO
+    use_material_lookup = simulation_config.material.resistivity_mode == rf.MATERIAL_SPECIFIC
     if use_material_lookup:
         material_entries = rf.get_entries_from_material_file(
             int(geometry_data.n_triangles),

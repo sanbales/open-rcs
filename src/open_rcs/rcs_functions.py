@@ -31,12 +31,17 @@ INPUT_MODEL = 0
 FREQUENCY = 1
 STANDART_DEVIATION = 3
 RESISTIVITY = 5
-MATERIALESPECIFICO = 1
+MATERIAL_SPECIFIC = 1
 TYPE = 0
 THETA = 1
 NTRIA = 14
 DESCRIPTION = 1
 LAYERS = 2
+MATERIAL_TYPE_PEC = "PEC"
+MATERIAL_TYPE_COMPOSITE = "Composite"
+MATERIAL_TYPE_COMPOSITE_ON_PEC = "Composite Layer on PEC"
+MATERIAL_TYPE_MULTI_LAYER = "Multiple Layers"
+MATERIAL_TYPE_MULTI_LAYER_ON_PEC = "Multiple Layers on PEC"
 RESULTS_DIR = Path("./results")
 NUMBA_AVAILABLE = njit is not None
 MaterialLayer = list[float]
@@ -179,7 +184,7 @@ def get_params_from_file(  # pragma: no cover
     param_list[FREQUENCY] = float(param_list[FREQUENCY]) * 1e9
     convert_stl(Path("./stl_models") / str(param_list[INPUT_MODEL]))
 
-    if int(param_list[RESISTIVITY]) != MATERIALESPECIFICO:
+    if int(param_list[RESISTIVITY]) != MATERIAL_SPECIFIC:
         param_list[-1] = "matrl.txt"
 
     angle_sweep = AngleSweep(
@@ -665,19 +670,19 @@ def taylor_g(n, w):
     return g
 
 
-def save_list_in_file(especific_list: list, especific_file: str) -> None:
-    especific_list_str = []
-    for row in especific_list:
+def save_list_in_file(material_rows: list, output_file: str) -> None:
+    serialized_rows = []
+    for row in material_rows:
         entry_str = str(row[TYPE]) + "," + str(row[DESCRIPTION])
 
         for layer in row[LAYERS:]:
             for i in range(len(layer)):
                 entry_str = entry_str + "," + str(layer[i])
 
-        especific_list_str.append(entry_str)
+        serialized_rows.append(entry_str)
 
-    with open(especific_file, "w") as file:
-        for row in especific_list_str:
+    with open(output_file, "w") as file:
+        for row in serialized_rows:
             file.write(row + "\n")
 
 
@@ -686,10 +691,10 @@ def get_entries_from_material_file(ntria: int, matrlpath: str) -> MaterialTable:
         with open(matrlpath) as file:
             matrl = get_material_properties_from_file(file)
     except Exception as exc:
-        raise FileNotFoundError("Matrl file not found.") from exc
+        raise FileNotFoundError("Material file not found.") from exc
 
     if len(matrl) != ntria:
-        raise ValueError("Number of entrys in matrl diferent from number of facets.")
+        raise ValueError("Number of material entries does not match the number of facets.")
 
     return matrl
 
@@ -1057,21 +1062,24 @@ def get_reflection_coeff_from_material(
     RCperp: float = 0.0
     RCpar: float = 0.0
 
-    if matrlLine[TYPE] == "PEC":
+    if matrlLine[TYPE] == MATERIAL_TYPE_PEC:
         RCperp = -1
         RCpar = -1
 
-    elif matrlLine[TYPE] == "Composito":
+    elif matrlLine[TYPE] == MATERIAL_TYPE_COMPOSITE:
         RCperp, RCpar = refl_coeff_composite(thri, phrii, alpha, beta, freq, matrlLine)
 
-    elif matrlLine[TYPE] == "Camada de Composito em PEC":
+    elif matrlLine[TYPE] == MATERIAL_TYPE_COMPOSITE_ON_PEC:
         RCperp, RCpar = refl_coeff_composite_layer_on_pec(thri, phrii, alpha, beta, freq, matrlLine)
 
-    elif matrlLine[TYPE] == "Multiplas Camadas":
+    elif matrlLine[TYPE] == MATERIAL_TYPE_MULTI_LAYER:
         RCperp, RCpar = refl_coeff_multi_layers(thri, phrii, alpha, beta, freq, matrlLine)
 
-    elif matrlLine[TYPE] == "Multiplas Camadas em PEC":
+    elif matrlLine[TYPE] == MATERIAL_TYPE_MULTI_LAYER_ON_PEC:
         RCperp, RCpar = refl_coeff_multi_layers_on_pec(thri, phrii, alpha, beta, freq, matrlLine)
+    else:
+        material_type = str(matrlLine[TYPE])
+        raise ValueError(f"Unsupported material type: {material_type}")
 
     return RCperp, RCpar
 
@@ -1091,7 +1099,7 @@ def reflection_coefficients(
     perp: float = 0.0
     para: float = 0.0
 
-    if rs == MATERIALESPECIFICO:
+    if rs == MATERIAL_SPECIFIC:
         perp, para = get_reflection_coeff_from_material(
             thri, phrii, alpha, beta, freq, matrl[index]
         )

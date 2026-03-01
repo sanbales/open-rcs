@@ -11,16 +11,16 @@ from open_rcs import rcs_functions as rf
 def test_material_roundtrip_and_pec_reflection() -> None:
     rows = [
         "PEC,plate\n",
-        "Composito,skin,2.0,1.0,0.01,0.02,0.03\n",
+        "Composite,skin,2.0,1.0,0.01,0.02,0.03\n",
     ]
     table = rf.convert_material_textlist_to_list(rows)
 
     assert table[0][rf.TYPE] == "PEC"
-    assert table[1][rf.TYPE] == "Composito"
+    assert table[1][rf.TYPE] == "Composite"
     assert table[1][rf.LAYERS] == [2.0, 1.0, 0.01, 0.02, 0.03]
 
     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
-        rs=float(rf.MATERIALESPECIFICO),
+        rs=float(rf.MATERIAL_SPECIFIC),
         index=0,
         th2=0.1,
         thri=0.2,
@@ -47,16 +47,16 @@ def test_get_entries_from_material_file_validates_count(tmp_path: Path) -> None:
 
 def test_reflection_models_return_finite_values() -> None:
     test_cases = [
-        ["Composito", "single", [2.5, 0.02, 1.0, 0.01, 1.5]],
-        ["Camada de Composito em PEC", "single-pec", [2.5, 0.02, 1.0, 0.01, 1.5]],
+        ["Composite", "single", [2.5, 0.02, 1.0, 0.01, 1.5]],
+        ["Composite Layer on PEC", "single-pec", [2.5, 0.02, 1.0, 0.01, 1.5]],
         [
-            "Multiplas Camadas",
+            "Multiple Layers",
             "multi",
             [2.2, 0.01, 1.0, 0.00, 1.0],
             [3.1, 0.02, 1.2, 0.01, 0.5],
         ],
         [
-            "Multiplas Camadas em PEC",
+            "Multiple Layers on PEC",
             "multi-pec",
             [2.2, 0.01, 1.0, 0.00, 1.0],
             [3.1, 0.02, 1.2, 0.01, 0.5],

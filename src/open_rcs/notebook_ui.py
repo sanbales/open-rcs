@@ -824,7 +824,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
             )
             use_material_file = bool(use_material_file_widget.value) and bool(material_options)
             material = MaterialConfig(
-                resistivity_mode=float(rf.MATERIALESPECIFICO if use_material_file else 0),
+                resistivity_mode=float(rf.MATERIAL_SPECIFIC if use_material_file else 0),
                 material_path=str(
                     material_file_widget.value
                     if use_material_file

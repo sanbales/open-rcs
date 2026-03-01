@@ -103,7 +103,7 @@ def test_simulate_progress_callback_and_material_lookup_paths(tmp_path: Path) ->
         simulate_monostatic,
     )
 
-    geometry_data = build_geometry_from_stl(PLATE_STL, rs_value=rf.MATERIALESPECIFICO)
+    geometry_data = build_geometry_from_stl(PLATE_STL, rs_value=rf.MATERIAL_SPECIFIC)
     material_file = tmp_path / "materials.txt"
     _write_pec_material_file(material_file, int(geometry_data.n_triangles))
 
@@ -116,7 +116,7 @@ def test_simulate_progress_callback_and_material_lookup_paths(tmp_path: Path) ->
         theta_step_deg=45.0,
     )
     material = MaterialConfig(
-        resistivity_mode=float(rf.MATERIALESPECIFICO),
+        resistivity_mode=float(rf.MATERIAL_SPECIFIC),
         material_path=str(material_file),
     )
     monostatic_config = MonostaticSimulationConfig(
