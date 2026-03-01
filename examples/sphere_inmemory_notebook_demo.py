@@ -19,6 +19,7 @@ from open_rcs import (
 
 
 def run_sphere_inmemory_demo(project_root: str | Path = "."):
+    """Run the in-memory sphere demo and return simulation data plus Plotly figures."""
     root = Path(project_root).resolve()
 
     model_path = root / "stl_models" / "sphere.stl"

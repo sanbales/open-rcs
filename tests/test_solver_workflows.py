@@ -1,3 +1,5 @@
+"""Tests for higher-level solver execution and callback workflows."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -44,6 +46,7 @@ def _write_pec_material_file(path: Path, n_triangles: int) -> None:
 
 
 def test_run_monostatic_and_bistatic_generate_artifacts(tmp_path: Path, monkeypatch) -> None:
+    """Verify run helpers produce expected result artifacts for both solver modes."""
     from open_rcs import (
         BistaticSimulationConfig,
         MaterialConfig,
@@ -92,6 +95,7 @@ def test_run_monostatic_and_bistatic_generate_artifacts(tmp_path: Path, monkeypa
 
 
 def test_simulate_progress_callback_and_material_lookup_paths(tmp_path: Path) -> None:
+    """Verify progress callbacks and material lookup mode execute successfully."""
     from open_rcs import (
         AngleSweep,
         BistaticSimulationConfig,

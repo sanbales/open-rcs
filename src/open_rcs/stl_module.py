@@ -32,12 +32,13 @@ def convert_stl(
     facets_output:
         Optional output file for facets. Pass ``None`` to skip writing.
 
-    Returns
+    Returns:
     -------
     tuple[np.ndarray, np.ndarray]
         ``(coordinates, facets)`` where coordinates has shape ``(N, 3)`` and
         facets has shape ``(M, 6)`` as
         ``[facet_id, v1, v2, v3, ilum_flag, rs]``.
+
     """
     stl_mesh = mesh.Mesh.from_file(str(file_path))
     faces = np.asarray(stl_mesh.vectors, dtype=np.float64)

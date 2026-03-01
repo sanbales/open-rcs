@@ -1,3 +1,5 @@
+"""Matplotlib plotting helpers and result file output for Open RCS."""
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -51,6 +53,7 @@ def plot_triangle_model(
     node3,
     nfc,
 ):
+    """Render and save a 3D triangle-wireframe view of the input geometry."""
     fig = plt.figure(1)
     fig.suptitle(f"Triangle Model of Target: {input_model}")
     ax = fig.add_subplot(1, 1, 1, projection="3d")
@@ -107,6 +110,7 @@ def final_plot(
     input_model: str,
     mode: str,
 ) -> str:
+    """Generate and save the final 2D RCS visualization for the selected sweep."""
     if phi_sample_count == 1:
         x_min, x_max = _expanded_limits(
             float(np.min(theta_grid_deg)),
@@ -168,9 +172,7 @@ def final_plot(
         if mode == "Monostatic":
             cp = ax.contour(direction_cosine_u_grid, direction_cosine_v_grid, rcs_theta_db)
         elif mode == "Bistatic":
-            cp = ax.contour(
-                direction_cosine_u_grid, direction_cosine_v_grid, rcs_theta_db, contour_levels
-            )
+            cp = ax.contour(direction_cosine_u_grid, direction_cosine_v_grid, rcs_theta_db, contour_levels)
         ax.set_title("RCS-theta")
         ax.set_xlabel("U")
         ax.set_ylabel("V")
@@ -182,9 +184,7 @@ def final_plot(
         if mode == "Monostatic":
             cp = bx.contour(direction_cosine_u_grid, direction_cosine_v_grid, rcs_phi_db)
         elif mode == "Bistatic":
-            cp = bx.contour(
-                direction_cosine_u_grid, direction_cosine_v_grid, rcs_phi_db, contour_levels
-            )
+            cp = bx.contour(direction_cosine_u_grid, direction_cosine_v_grid, rcs_phi_db, contour_levels)
         bx.set_title("RCS-phi")
         bx.set_xlabel("U")
         bx.set_ylabel("V")
@@ -209,6 +209,7 @@ def generate_result_files(
     parameter_text: str,
     phi_sample_count: int,
 ):
+    """Write simulation parameters and RCS arrays to a timestamped results file."""
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d%H%M%S")
     file_name = str(RESULTS_DIR / f"temp_{now}.dat")
@@ -248,6 +249,7 @@ def plot_parameters(
     theta_stop_deg: float,
     theta_step_deg: float,
 ):
+    """Format simulation settings into a text block for report output."""
     param = f"    Mode: {mode}\n\
     Radar Frequency (GHz): {frequency_hz / 1e9}\n\
     Wavelength (m): {wavelength_m}\n\
@@ -264,6 +266,7 @@ def plot_parameters(
 
 
 def plot_limits(rcs_theta_db: np.ndarray, rcs_phi_db: np.ndarray):
+    """Compute display bounds from theta/phi RCS grids."""
     rcs_max_db = max(np.max(rcs_theta_db), np.max(rcs_phi_db))
     rounded_max_db = (np.floor(rcs_max_db / 5) + 1) * 5
     rcs_min_db = min(np.min(rcs_theta_db), np.min(rcs_phi_db))

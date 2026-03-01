@@ -63,9 +63,7 @@ def simulate_monostatic(
         normalized_correlation_distance,
         wavelength_m,
     )
-    _, electric_theta_component, electric_phi_component = rf.get_polarization(
-        simulation_config.incident_polarization
-    )
+    _, electric_theta_component, electric_phi_component = rf.get_polarization(simulation_config.incident_polarization)
     incident_amplitude = 1.0
 
     (
@@ -361,9 +359,7 @@ def simulate_monostatic(
                         + local_field_y * local_cosine_theta * local_sine_phi
                         - local_field_z * local_sine_theta
                     )
-                    local_phi_field = (
-                        -local_field_x * local_sine_phi + local_field_y * local_cosine_phi
-                    )
+                    local_phi_field = -local_field_x * local_sine_phi + local_field_y * local_cosine_phi
 
                     local_theta_angle = math.asin(local_sine_theta)
                     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
@@ -381,17 +377,11 @@ def simulate_monostatic(
 
                     local_surface_current_x = (
                         -local_theta_field * local_cosine_phi * reflection_parallel
-                        + local_phi_field
-                        * local_sine_phi
-                        * reflection_perpendicular
-                        * local_cosine_theta
+                        + local_phi_field * local_sine_phi * reflection_perpendicular * local_cosine_theta
                     )
                     local_surface_current_y = (
                         -local_theta_field * local_sine_phi * reflection_parallel
-                        - local_phi_field
-                        * local_cosine_phi
-                        * reflection_perpendicular
-                        * local_cosine_theta
+                        - local_phi_field * local_cosine_phi * reflection_perpendicular * local_cosine_theta
                     )
 
                     area_integral_value = rf.calculate_ic(
@@ -405,17 +395,9 @@ def simulate_monostatic(
                     )
 
                     triangle_area = float(triangle_areas[triangle_index])
-                    diffuse_scale = (
-                        roughness_factor_secondary * triangle_area * (local_cosine_theta**2)
-                    )
+                    diffuse_scale = roughness_factor_secondary * triangle_area * (local_cosine_theta**2)
                     diffuse_exponent = -(
-                        (
-                            normalized_correlation_distance
-                            * math.pi
-                            * local_sine_theta
-                            / wavelength_m
-                        )
-                        ** 2
+                        (normalized_correlation_distance * math.pi * local_sine_theta / wavelength_m) ** 2
                     )
                     diffuse_component = diffuse_scale * math.exp(diffuse_exponent)
 
@@ -424,22 +406,12 @@ def simulate_monostatic(
                     diffuse_local_x = local_surface_current_x * diffuse_component
                     diffuse_local_y = local_surface_current_y * diffuse_component
 
-                    scattered_global_x = (
-                        cosine_alpha * cosine_beta * scattered_local_x
-                        - sine_alpha * scattered_local_y
-                    )
-                    scattered_global_y = (
-                        sine_alpha * cosine_beta * scattered_local_x
-                        + cosine_alpha * scattered_local_y
-                    )
+                    scattered_global_x = cosine_alpha * cosine_beta * scattered_local_x - sine_alpha * scattered_local_y
+                    scattered_global_y = sine_alpha * cosine_beta * scattered_local_x + cosine_alpha * scattered_local_y
                     scattered_global_z = -sine_beta * scattered_local_x
 
-                    diffuse_global_x = (
-                        cosine_alpha * cosine_beta * diffuse_local_x - sine_alpha * diffuse_local_y
-                    )
-                    diffuse_global_y = (
-                        sine_alpha * cosine_beta * diffuse_local_x + cosine_alpha * diffuse_local_y
-                    )
+                    diffuse_global_x = cosine_alpha * cosine_beta * diffuse_local_x - sine_alpha * diffuse_local_y
+                    diffuse_global_y = sine_alpha * cosine_beta * diffuse_local_x + cosine_alpha * diffuse_local_y
                     diffuse_global_z = -sine_beta * diffuse_local_x
 
                     accumulated_fields.theta_component += (
@@ -447,17 +419,13 @@ def simulate_monostatic(
                         + theta_projection_v * scattered_global_y
                         + theta_projection_w * scattered_global_z
                     )
-                    accumulated_fields.phi_component += (
-                        -sine_phi * scattered_global_x + cosine_phi * scattered_global_y
-                    )
+                    accumulated_fields.phi_component += -sine_phi * scattered_global_x + cosine_phi * scattered_global_y
                     accumulated_fields.diffuse_theta += abs(
                         theta_projection_u * diffuse_global_x
                         + theta_projection_v * diffuse_global_y
                         + theta_projection_w * diffuse_global_z
                     )
-                    accumulated_fields.diffuse_phi += abs(
-                        -sine_phi * diffuse_global_x + cosine_phi * diffuse_global_y
-                    )
+                    accumulated_fields.diffuse_phi += abs(-sine_phi * diffuse_global_x + cosine_phi * diffuse_global_y)
 
             rf.calculate_sth_sph(
                 roughness_factor_primary,
@@ -472,9 +440,7 @@ def simulate_monostatic(
                 accumulated_fields.diffuse_phi,
             )
             completed_samples += 1
-            if progress_callback and (
-                completed_samples % callback_stride == 0 or completed_samples == total_samples
-            ):
+            if progress_callback and (completed_samples % callback_stride == 0 or completed_samples == total_samples):
                 progress_callback(completed_samples, total_samples)
 
     return RcsComputationResult(
@@ -498,9 +464,7 @@ def run_monostatic(
 ) -> SolverResult:
     """Run monostatic simulation and persist standard artifacts to disk."""
     simulation_result = simulate_monostatic(simulation_config, geometry_data)
-    rcs_max_db, rcs_min_db = rf.plot_limits(
-        simulation_result.rcs_theta_db, simulation_result.rcs_phi_db
-    )
+    rcs_max_db, rcs_min_db = rf.plot_limits(simulation_result.rcs_theta_db, simulation_result.rcs_phi_db)
     polarization_label = rf.get_polarization(simulation_config.incident_polarization)[0]
 
     rf.set_font_option()

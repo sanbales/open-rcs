@@ -1,3 +1,5 @@
+"""Shared enums, constants, and type aliases used across Open RCS modules."""
+
 from __future__ import annotations
 
 from enum import Enum, IntEnum
@@ -23,39 +25,50 @@ class RadarBand(Enum):
 
     @property
     def min_freq(self) -> float:
+        """Return the minimum frequency bound (GHz) for the band."""
         return self.value[0]
 
     @property
     def center_freq(self) -> float:
+        """Return the midpoint frequency (GHz) for the band."""
         return 0.5 * sum(self.value)
 
     @property
     def max_freq(self) -> float:
+        """Return the maximum frequency bound (GHz) for the band."""
         return self.value[1]
 
     @classmethod
     def to_string_list(cls) -> list[str]:
-        """Returns a list of strings formatted as 'NAME: MIN-MAX GHz'."""
+        """Return a list of strings formatted as 'NAME: MIN-MAX GHz'."""
         return [f"{band.name}: {band.value[0]}-{band.value[1]} GHz" for band in cls]
 
 
 class FontSize(IntEnum):
+    """Default font-size presets used by plotting helpers."""
+
     SMALL = 8
     MEDIUM = 10
     LARGE = 12
 
 
 class SphericalIndex(IntEnum):
+    """Index mapping for spherical vectors represented as ``[r, theta, phi]``."""
+
     THETA = 1
 
 
 class MaterialEntryIndex(IntEnum):
+    """Field positions in one material entry row."""
+
     TYPE = 0
     DESCRIPTION = 1
     FIRST_LAYER = 2
 
 
 class MaterialType(str, Enum):
+    """Canonical material model labels used by the solver."""
+
     PEC = "PEC"
     COMPOSITE = "Composite"
     COMPOSITE_ON_PEC = "Composite Layer on PEC"
@@ -64,6 +77,8 @@ class MaterialType(str, Enum):
 
 
 class MaterialCode(IntEnum):
+    """Integer material codes used by numba kernels."""
+
     PEC = 0
     COMPOSITE = 1
     COMPOSITE_ON_PEC = 2

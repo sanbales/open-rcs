@@ -1,3 +1,5 @@
+"""Legacy input-file parsing helpers for building typed simulation configs."""
+
 from enum import IntEnum
 from pathlib import Path
 
@@ -12,6 +14,8 @@ from .stl_module import convert_stl
 
 
 class LegacyInputIndex(IntEnum):
+    """Column indices for legacy ``input_data_file_*.dat`` parameter lists."""
+
     INPUT_MODEL = 0
     FREQUENCY_GHZ = 1
     RESISTIVITY_MODE = 5
@@ -45,9 +49,7 @@ def get_params_from_file(  # pragma: no cover
             if row and not row.startswith("#"):
                 param_list.append(_parse_param(row))
 
-    param_list[LegacyInputIndex.FREQUENCY_GHZ] = (
-        float(param_list[LegacyInputIndex.FREQUENCY_GHZ]) * 1e9
-    )
+    param_list[LegacyInputIndex.FREQUENCY_GHZ] = float(param_list[LegacyInputIndex.FREQUENCY_GHZ]) * 1e9
     convert_stl(Path("./stl_models") / str(param_list[LegacyInputIndex.INPUT_MODEL]))
 
     if int(param_list[LegacyInputIndex.RESISTIVITY_MODE]) != SPECIFIC_MATERIAL:

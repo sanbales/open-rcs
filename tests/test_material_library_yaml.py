@@ -1,3 +1,5 @@
+"""Tests for YAML-based material library parsing and assignments."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -10,6 +12,7 @@ pytest.importorskip("yaml")
 
 
 def test_rcsmat_yaml_assignments_with_tags_and_ranges(tmp_path: Path) -> None:
+    """Verify YAML tags/ranges map facets to the expected material entries."""
     material_path = tmp_path / "library.rcsmat"
     material_path.write_text(
         "\n".join(
@@ -58,6 +61,7 @@ def test_rcsmat_yaml_assignments_with_tags_and_ranges(tmp_path: Path) -> None:
 
 
 def test_rcsmat_yaml_reports_invalid_tag_reference(tmp_path: Path) -> None:
+    """Verify undefined tags in assignments raise a validation error."""
     material_path = tmp_path / "invalid.rcsmat"
     material_path.write_text(
         "\n".join(

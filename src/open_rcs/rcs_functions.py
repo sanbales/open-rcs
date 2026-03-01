@@ -1,3 +1,5 @@
+"""Core numerical helpers and acceleration kernels used by Open RCS solvers."""
+
 from __future__ import annotations
 
 import cmath
@@ -89,9 +91,7 @@ def get_polarization(incident_polarization: int) -> tuple[str, complex, complex]
     raise ValueError("Invalid polarization value. Use 0 (TM-z) or 1 (TE-z).")
 
 
-def get_standard_deviation(
-    delstd: float, corel: float, wave: float
-) -> tuple[float, float, float, float, float, int]:
+def get_standard_deviation(delstd: float, corel: float, wave: float) -> tuple[float, float, float, float, float, int]:
     """Compute roughness-related constants used during scattering integration."""
     delsq = float(delstd) ** 2
     bk = 2 * np.pi / wave
@@ -266,6 +266,8 @@ def direction_cosines_from_precomputed(
 
 
 def calculate_values(pstart, pstop, delp, tstart, tstop, delt, ntria, rad):
+    """Allocate monostatic work arrays and compute phi/theta sample counts."""
+
     def calculate_ip():
         if delp == 0:
             return int((pstop - pstart) + 1)
@@ -291,6 +293,7 @@ def calculate_values(pstart, pstop, delp, tstart, tstop, delt, ntria, rad):
 
 
 def bi_calculate_values(pstart, pstop, delp, tstart, tstop, delt, ntria, rad, fii, thetai):
+    """Allocate bistatic work arrays and precompute incident-direction constants."""
     # Compute trigonometric function values
     cpi = np.cos(fii * np.pi / 180.0)
     spi = np.sin(fii * np.pi / 180.0)
@@ -341,6 +344,7 @@ def global_angles(
     phi_index: int,
     theta_index: int,
 ):
+    """Populate direction-cosine grids and spherical theta-basis projections."""
     direction_u = math.sin(theta_radians) * math.cos(phi_radians)
     direction_v = math.sin(theta_radians) * math.sin(phi_radians)
     direction_w = math.cos(theta_radians)
@@ -374,12 +378,12 @@ def incident_field_cartesian(
     phi_radians: float,
     electric_phi_component: complex,
 ):
+    """Convert incident electric field from spherical to Cartesian components."""
     incident_field_components[0] = (
         theta_projection_u * electric_theta_component - np.sin(phi_radians) * electric_phi_component
     )
     incident_field_components[1] = (
-        theta_projection_v * electric_theta_component
-        + math.cos(phi_radians) * electric_phi_component
+        theta_projection_v * electric_theta_component + math.cos(phi_radians) * electric_phi_component
     )
     incident_field_components[2] = theta_projection_w * electric_theta_component
     return incident_field_components
@@ -395,6 +399,7 @@ def bi_incident_field_cartesian(
     electric_phi_component: complex,
     incident_field_components: np.ndarray,
 ):
+    """Convert bistatic incident electric field from spherical to Cartesian components."""
     incident_field_components[0] = (
         theta_projection_u * electric_theta_component - sine_incident_phi * electric_phi_component
     )
@@ -406,6 +411,7 @@ def bi_incident_field_cartesian(
 
 
 def spherical_angles(u2, v2, w2):
+    """Return signed local spherical angles from direction cosines."""
     radial_xy = math.hypot(u2, v2)
     signed_sine_theta = radial_xy if w2 >= 0 else -radial_xy
     signed_sine_theta = max(-1.0, min(1.0, signed_sine_theta))
@@ -415,6 +421,7 @@ def spherical_angles(u2, v2, w2):
 
 
 def bi_spherical_angles(ui2, vi2, wi2):
+    """Return bistatic local spherical-angle values and cached trig terms."""
     radial_xy = math.hypot(ui2, vi2)
     sti2 = radial_xy if wi2 >= 0 else -radial_xy
     sti2 = max(-1.0, min(1.0, sti2))
@@ -425,7 +432,7 @@ def bi_spherical_angles(ui2, vi2, wi2):
 
 
 def phase_vertex_triangle(x, y, z, vind, bk, m, u, v, w):
-
+    """Compute monostatic phase terms for one triangle from raw vertex arrays."""
     Dp = (
         2
         * bk
@@ -477,20 +484,12 @@ def phase_vertex_triangle_precomputed(
     dp = (
         2.0
         * wave_number
-        * (
-            phase_p_vector[0] * direction_u
-            + phase_p_vector[1] * direction_v
-            + phase_p_vector[2] * direction_w
-        )
+        * (phase_p_vector[0] * direction_u + phase_p_vector[1] * direction_v + phase_p_vector[2] * direction_w)
     )
     dq = (
         2.0
         * wave_number
-        * (
-            phase_q_vector[0] * direction_u
-            + phase_q_vector[1] * direction_v
-            + phase_q_vector[2] * direction_w
-        )
+        * (phase_q_vector[0] * direction_u + phase_q_vector[1] * direction_v + phase_q_vector[2] * direction_w)
     )
     do = (
         2.0
@@ -505,6 +504,7 @@ def phase_vertex_triangle_precomputed(
 
 
 def bi_phase_vertex_triangle(x, y, z, vind, bk, m, u, v, w, ui, vi, wi):
+    """Compute bistatic phase terms for one triangle from raw vertex arrays."""
     Dp = bk * (
         (x[vind[m, 0] - 1] - x[vind[m, 2] - 1]) * (u + ui)
         + (y[vind[m, 0] - 1] - y[vind[m, 2] - 1]) * (v + vi)
@@ -515,9 +515,7 @@ def bi_phase_vertex_triangle(x, y, z, vind, bk, m, u, v, w, ui, vi, wi):
         + (y[vind[m, 1] - 1] - y[vind[m, 2] - 1]) * (v + vi)
         + (z[vind[m, 1] - 1] - z[vind[m, 2] - 1]) * (w + wi)
     )
-    Do = bk * (
-        x[vind[m, 2] - 1] * (u + ui) + y[vind[m, 2] - 1] * (v + vi) + z[vind[m, 2] - 1] * (w + wi)
-    )
+    Do = bk * (x[vind[m, 2] - 1] * (u + ui) + y[vind[m, 2] - 1] * (v + vi) + z[vind[m, 2] - 1] * (w + wi))
     return (Dp, Dq, Do)
 
 
@@ -542,24 +540,19 @@ def bi_phase_vertex_triangle_precomputed(
     phase_q_vector = phase_q_vectors[triangle_index]
     phase_origin_vector = phase_origin_vectors[triangle_index]
     dp = wave_number * (
-        phase_p_vector[0] * combined_u
-        + phase_p_vector[1] * combined_v
-        + phase_p_vector[2] * combined_w
+        phase_p_vector[0] * combined_u + phase_p_vector[1] * combined_v + phase_p_vector[2] * combined_w
     )
     dq = wave_number * (
-        phase_q_vector[0] * combined_u
-        + phase_q_vector[1] * combined_v
-        + phase_q_vector[2] * combined_w
+        phase_q_vector[0] * combined_u + phase_q_vector[1] * combined_v + phase_q_vector[2] * combined_w
     )
     do = wave_number * (
-        phase_origin_vector[0] * combined_u
-        + phase_origin_vector[1] * combined_v
-        + phase_origin_vector[2] * combined_w
+        phase_origin_vector[0] * combined_u + phase_origin_vector[1] * combined_v + phase_origin_vector[2] * combined_w
     )
     return dp, dq, do
 
 
 def taylor_g(n, w):
+    """Evaluate the Taylor-region helper function used in area-integral branches."""
     jw = 1j * w
     exp_jw = np.exp(jw)
     g = (exp_jw - 1) / jw
@@ -579,6 +572,7 @@ def calculate_ic(
     incident_amplitude: float,
     taylor_threshold: float,
 ) -> complex:
+    """Compute the triangle area integral with stable handling near singular limits."""
     area_scale = 2.0 * triangle_area
     phase_difference = phase_q - phase_p
     abs_phase_p = abs(phase_p)
@@ -591,8 +585,7 @@ def calculate_ic(
         series_integral: complex = 0.0 + 0.0j
         for n in range(taylor_terms + 1):
             series_integral = series_integral + (1j * phase_p) ** n / math.factorial(n) * (
-                -incident_amplitude / (n + 1)
-                + exp_phase_q * (incident_amplitude * taylor_g(n, -phase_q))
+                -incident_amplitude / (n + 1) + exp_phase_q * (incident_amplitude * taylor_g(n, -phase_q))
             )
         area_integral_value = series_integral * area_scale * exp_phase_origin / (1j * phase_q)
     # special case 2
@@ -602,10 +595,7 @@ def calculate_ic(
             for nn in range(taylor_terms):
                 series_integral = (
                     series_integral
-                    + (1j * phase_p) ** n
-                    * (1j * phase_q) ** nn
-                    / math.factorial(nn + n + 2)
-                    * incident_amplitude
+                    + (1j * phase_p) ** n * (1j * phase_q) ** nn / math.factorial(nn + n + 2) * incident_amplitude
                 )
         area_integral_value = series_integral * area_scale * exp_phase_origin
     # special case 3
@@ -613,22 +603,19 @@ def calculate_ic(
         exp_phase_p = cmath.exp(1j * phase_p)
         series_integral = 0.0 + 0.0j
         for n in range(taylor_terms + 1):
-            series_integral = series_integral + (1j * phase_q) ** n / math.factorial(
-                n
-            ) * incident_amplitude * (taylor_g(n + 1, -phase_p) / (n + 1))
+            series_integral = series_integral + (1j * phase_q) ** n / math.factorial(n) * incident_amplitude * (
+                taylor_g(n + 1, -phase_p) / (n + 1)
+            )
         area_integral_value = series_integral * area_scale * exp_phase_origin * exp_phase_p
     # special case 4
     elif (
-        abs_phase_p >= taylor_threshold
-        and abs_phase_q >= taylor_threshold
-        and abs_phase_difference < taylor_threshold
+        abs_phase_p >= taylor_threshold and abs_phase_q >= taylor_threshold and abs_phase_difference < taylor_threshold
     ):
         exp_phase_q = cmath.exp(1j * phase_q)
         series_integral = 0.0 + 0.0j
         for n in range(taylor_terms + 1):
             series_integral = series_integral + (1j * phase_difference) ** n / math.factorial(n) * (
-                -incident_amplitude * taylor_g(n, phase_q)
-                + exp_phase_q * incident_amplitude / (n + 1)
+                -incident_amplitude * taylor_g(n, phase_q) + exp_phase_q * incident_amplitude / (n + 1)
             )
         area_integral_value = series_integral * area_scale * exp_phase_origin / (1j * phase_q)
     else:
@@ -688,8 +675,7 @@ if NUMBA_AVAILABLE:
             series_integral = 0.0 + 0.0j
             for n in range(taylor_terms + 1):
                 series_integral = series_integral + (1j * phase_p) ** n / _factorial_numba(n) * (
-                    -incident_amplitude / (n + 1)
-                    + exp_phase_q * (incident_amplitude * _taylor_g_numba(n, -phase_q))
+                    -incident_amplitude / (n + 1) + exp_phase_q * (incident_amplitude * _taylor_g_numba(n, -phase_q))
                 )
             return complex(series_integral * area_scale * exp_phase_origin / (1j * phase_q))
 
@@ -699,10 +685,7 @@ if NUMBA_AVAILABLE:
                 for nn in range(taylor_terms):
                     series_integral = (
                         series_integral
-                        + (1j * phase_p) ** n
-                        * (1j * phase_q) ** nn
-                        / _factorial_numba(nn + n + 2)
-                        * incident_amplitude
+                        + (1j * phase_p) ** n * (1j * phase_q) ** nn / _factorial_numba(nn + n + 2) * incident_amplitude
                     )
             return complex(series_integral * area_scale * exp_phase_origin)
 
@@ -710,9 +693,9 @@ if NUMBA_AVAILABLE:
             exp_phase_p = np.exp(1j * phase_p)
             series_integral = 0.0 + 0.0j
             for n in range(taylor_terms + 1):
-                series_integral = series_integral + (1j * phase_q) ** n / _factorial_numba(
-                    n
-                ) * incident_amplitude * (_taylor_g_numba(n + 1, -phase_p) / (n + 1))
+                series_integral = series_integral + (1j * phase_q) ** n / _factorial_numba(n) * incident_amplitude * (
+                    _taylor_g_numba(n + 1, -phase_p) / (n + 1)
+                )
             return complex(series_integral * area_scale * exp_phase_origin * exp_phase_p)
 
         if (
@@ -723,11 +706,8 @@ if NUMBA_AVAILABLE:
             exp_phase_q = np.exp(1j * phase_q)
             series_integral = 0.0 + 0.0j
             for n in range(taylor_terms + 1):
-                series_integral = series_integral + (1j * phase_difference) ** n / _factorial_numba(
-                    n
-                ) * (
-                    -incident_amplitude * _taylor_g_numba(n, phase_q)
-                    + exp_phase_q * incident_amplitude / (n + 1)
+                series_integral = series_integral + (1j * phase_difference) ** n / _factorial_numba(n) * (
+                    -incident_amplitude * _taylor_g_numba(n, phase_q) + exp_phase_q * incident_amplitude / (n + 1)
                 )
             return complex(series_integral * area_scale * exp_phase_origin / (1j * phase_q))
 
@@ -793,9 +773,7 @@ if NUMBA_AVAILABLE:
     ) -> tuple[complex, complex, float, int]:  # pragma: no cover
         permeability_vacuum = 4 * math.pi * 1e-7
         permittivity_vacuum = 8.854e-12
-        sinthetat = math.sin(theta_incident) * math.sqrt(
-            (np.real(er1) * np.real(mr1)) / (np.real(er2) * np.real(mr2))
-        )
+        sinthetat = math.sin(theta_incident) * math.sqrt((np.real(er1) * np.real(mr1)) / (np.real(er2) * np.real(mr2)))
         tir_flag = 0
         if sinthetat > 1.0:
             tir_flag = 1
@@ -922,9 +900,7 @@ if NUMBA_AVAILABLE:
                     gamma_parallel = (z_parallel - z_0) / (z_parallel + z_0)
                     gamma_perpendicular = (z_perpendicular - z_0) / (z_perpendicular + z_0)
                 else:
-                    gamma_parallel = (z_parallel - previous_z_parallel) / (
-                        z_parallel + previous_z_parallel
-                    )
+                    gamma_parallel = (z_parallel - previous_z_parallel) / (z_parallel + previous_z_parallel)
                     gamma_perpendicular = (z_perpendicular - previous_z_perpendicular) / (
                         z_perpendicular + previous_z_perpendicular
                     )
@@ -933,9 +909,7 @@ if NUMBA_AVAILABLE:
                 previous_z_perpendicular = z_perpendicular
                 tau_parallel = 1.0 + gamma_parallel
                 tau_perpendicular = 1.0 + gamma_perpendicular
-                phase = (
-                    beta_0 * thickness * np.sqrt(epsilon_complex * mu_complex - sine_incidence**2)
-                )
+                phase = beta_0 * thickness * np.sqrt(epsilon_complex * mu_complex - sine_incidence**2)
 
                 w00p, w01p, w10p, w11p = _apply_transfer_matrix_numba(
                     w00p,
@@ -1109,10 +1083,7 @@ if NUMBA_AVAILABLE:
             )
             if illumination_flag_mode == 0:
                 illumination_flag = illumination_flags[triangle_index]
-                if not (
-                    (illumination_flag == 1 and normal_dot_observer >= 1e-5)
-                    or illumination_flag == 0
-                ):
+                if not ((illumination_flag == 1 and normal_dot_observer >= 1e-5) or illumination_flag == 0):
                     continue
 
             cosine_alpha = surface_alpha_cos[triangle_index]
@@ -1212,9 +1183,7 @@ if NUMBA_AVAILABLE:
             )
 
             diffuse_scale = roughness_factor_secondary * triangle_area * (local_cosine_theta**2)
-            diffuse_exponent = -(
-                (normalized_correlation_distance * math.pi * local_sine_theta / wavelength_m) ** 2
-            )
+            diffuse_exponent = -((normalized_correlation_distance * math.pi * local_sine_theta / wavelength_m) ** 2)
             diffuse_component = diffuse_scale * math.exp(diffuse_exponent)
 
             scattered_local_x = local_surface_current_x * area_integral_value
@@ -1222,20 +1191,12 @@ if NUMBA_AVAILABLE:
             diffuse_local_x = local_surface_current_x * diffuse_component
             diffuse_local_y = local_surface_current_y * diffuse_component
 
-            scattered_global_x = (
-                cosine_alpha * cosine_beta * scattered_local_x - sine_alpha * scattered_local_y
-            )
-            scattered_global_y = (
-                sine_alpha * cosine_beta * scattered_local_x + cosine_alpha * scattered_local_y
-            )
+            scattered_global_x = cosine_alpha * cosine_beta * scattered_local_x - sine_alpha * scattered_local_y
+            scattered_global_y = sine_alpha * cosine_beta * scattered_local_x + cosine_alpha * scattered_local_y
             scattered_global_z = -sine_beta * scattered_local_x
 
-            diffuse_global_x = (
-                cosine_alpha * cosine_beta * diffuse_local_x - sine_alpha * diffuse_local_y
-            )
-            diffuse_global_y = (
-                sine_alpha * cosine_beta * diffuse_local_x + cosine_alpha * diffuse_local_y
-            )
+            diffuse_global_x = cosine_alpha * cosine_beta * diffuse_local_x - sine_alpha * diffuse_local_y
+            diffuse_global_y = sine_alpha * cosine_beta * diffuse_local_x + cosine_alpha * diffuse_local_y
             diffuse_global_z = -sine_beta * diffuse_local_x
 
             theta_component += (
@@ -1324,10 +1285,7 @@ if NUMBA_AVAILABLE:
             )
             if illumination_flag_mode == 0:
                 illumination_flag = illumination_flags[triangle_index]
-                if not (
-                    (illumination_flag == 1 and incident_normal_dot >= 0.0)
-                    or illumination_flag == 0
-                ):
+                if not ((illumination_flag == 1 and incident_normal_dot >= 0.0) or illumination_flag == 0):
                     continue
 
             cosine_alpha = surface_alpha_cos[triangle_index]
@@ -1335,19 +1293,13 @@ if NUMBA_AVAILABLE:
             cosine_beta = surface_beta_cos[triangle_index]
             sine_beta = surface_beta_sin[triangle_index]
 
-            rotated_incident_u = (
-                cosine_alpha * incident_direction_u + sine_alpha * incident_direction_v
-            )
+            rotated_incident_u = cosine_alpha * incident_direction_u + sine_alpha * incident_direction_v
             incident_local_u = cosine_beta * rotated_incident_u - sine_beta * incident_direction_w
-            incident_local_v = (
-                -sine_alpha * incident_direction_u + cosine_alpha * incident_direction_v
-            )
+            incident_local_v = -sine_alpha * incident_direction_u + cosine_alpha * incident_direction_v
             incident_local_w = sine_beta * rotated_incident_u + cosine_beta * incident_direction_w
 
             incident_local_radial = math.hypot(incident_local_u, incident_local_v)
-            incident_local_sine_theta = (
-                incident_local_radial if incident_local_w >= 0 else -incident_local_radial
-            )
+            incident_local_sine_theta = incident_local_radial if incident_local_w >= 0 else -incident_local_radial
             if incident_local_sine_theta > 1.0:
                 incident_local_sine_theta = 1.0
             elif incident_local_sine_theta < -1.0:
@@ -1361,18 +1313,10 @@ if NUMBA_AVAILABLE:
                 cosine_incident_phi = incident_local_u * inverse_incident_local_radial
                 sine_incident_phi = incident_local_v * inverse_incident_local_radial
 
-            rotated_observation_u = (
-                cosine_alpha * observation_direction_u + sine_alpha * observation_direction_v
-            )
-            observation_local_u = (
-                cosine_beta * rotated_observation_u - sine_beta * observation_direction_w
-            )
-            observation_local_v = (
-                -sine_alpha * observation_direction_u + cosine_alpha * observation_direction_v
-            )
-            observation_local_w = (
-                sine_beta * rotated_observation_u + cosine_beta * observation_direction_w
-            )
+            rotated_observation_u = cosine_alpha * observation_direction_u + sine_alpha * observation_direction_v
+            observation_local_u = cosine_beta * rotated_observation_u - sine_beta * observation_direction_w
+            observation_local_v = -sine_alpha * observation_direction_u + cosine_alpha * observation_direction_v
+            observation_local_w = sine_beta * rotated_observation_u + cosine_beta * observation_direction_w
 
             observation_local_radial = math.hypot(observation_local_u, observation_local_v)
             observation_local_sine_theta = (
@@ -1411,9 +1355,7 @@ if NUMBA_AVAILABLE:
                 + local_field_y * incident_local_cosine_theta * sine_incident_phi
                 - local_field_z * incident_local_sine_theta
             )
-            local_phi_field = (
-                -local_field_x * sine_incident_phi + local_field_y * cosine_incident_phi
-            )
+            local_phi_field = -local_field_x * sine_incident_phi + local_field_y * cosine_incident_phi
 
             if material_mode == 1:
                 observation_local_theta = math.acos(observation_local_cosine_theta)
@@ -1431,29 +1373,19 @@ if NUMBA_AVAILABLE:
                 )
             else:
                 resistivity = resistivity_values[triangle_index]
-                reflection_perpendicular = -1.0 / (
-                    2.0 * resistivity * observation_local_cosine_theta + 1.0
-                )
+                reflection_perpendicular = -1.0 / (2.0 * resistivity * observation_local_cosine_theta + 1.0)
                 reflection_parallel = 0.0 + 0.0j
                 reflection_parallel_denominator = 2.0 * resistivity + observation_local_cosine_theta
                 if reflection_parallel_denominator != 0.0:
-                    reflection_parallel = (
-                        -observation_local_cosine_theta / reflection_parallel_denominator
-                    )
+                    reflection_parallel = -observation_local_cosine_theta / reflection_parallel_denominator
 
             local_surface_current_x = (
                 -local_theta_field * cosine_incident_phi * reflection_parallel
-                + local_phi_field
-                * sine_incident_phi
-                * reflection_perpendicular
-                * incident_local_cosine_theta
+                + local_phi_field * sine_incident_phi * reflection_perpendicular * incident_local_cosine_theta
             )
             local_surface_current_y = (
                 -local_theta_field * sine_incident_phi * reflection_parallel
-                - local_phi_field
-                * cosine_incident_phi
-                * reflection_perpendicular
-                * incident_local_cosine_theta
+                - local_phi_field * cosine_incident_phi * reflection_perpendicular * incident_local_cosine_theta
             )
 
             triangle_area = triangle_areas[triangle_index]
@@ -1467,17 +1399,9 @@ if NUMBA_AVAILABLE:
                 taylor_threshold,
             )
 
-            diffuse_scale = (
-                roughness_factor_secondary * triangle_area * (observation_local_cosine_theta**2)
-            )
+            diffuse_scale = roughness_factor_secondary * triangle_area * (observation_local_cosine_theta**2)
             diffuse_exponent = -(
-                (
-                    normalized_correlation_distance
-                    * math.pi
-                    * observation_local_sine_theta
-                    / wavelength_m
-                )
-                ** 2
+                (normalized_correlation_distance * math.pi * observation_local_sine_theta / wavelength_m) ** 2
             )
             diffuse_component = diffuse_scale * math.exp(diffuse_exponent)
 
@@ -1486,20 +1410,12 @@ if NUMBA_AVAILABLE:
             diffuse_local_x = local_surface_current_x * diffuse_component
             diffuse_local_y = local_surface_current_y * diffuse_component
 
-            scattered_global_x = (
-                cosine_alpha * cosine_beta * scattered_local_x - sine_alpha * scattered_local_y
-            )
-            scattered_global_y = (
-                sine_alpha * cosine_beta * scattered_local_x + cosine_alpha * scattered_local_y
-            )
+            scattered_global_x = cosine_alpha * cosine_beta * scattered_local_x - sine_alpha * scattered_local_y
+            scattered_global_y = sine_alpha * cosine_beta * scattered_local_x + cosine_alpha * scattered_local_y
             scattered_global_z = -sine_beta * scattered_local_x
 
-            diffuse_global_x = (
-                cosine_alpha * cosine_beta * diffuse_local_x - sine_alpha * diffuse_local_y
-            )
-            diffuse_global_y = (
-                sine_alpha * cosine_beta * diffuse_local_x + cosine_alpha * diffuse_local_y
-            )
+            diffuse_global_x = cosine_alpha * cosine_beta * diffuse_local_x - sine_alpha * diffuse_local_y
+            diffuse_global_y = sine_alpha * cosine_beta * diffuse_local_x + cosine_alpha * diffuse_local_y
             diffuse_global_z = -sine_beta * diffuse_local_x
 
             theta_component += (
@@ -1961,6 +1877,7 @@ def calculate_fields(
     transform_z: np.ndarray,
     transform_y: np.ndarray,
 ):
+    """Accumulate coherent and diffuse scattered-field components for one facet."""
     cosine_alpha = float(transform_z[0, 0])
     sine_alpha = float(transform_z[0, 1])
     cosine_beta = float(transform_y[0, 0])
@@ -1970,9 +1887,7 @@ def calculate_fields(
         roughness_factor_secondary
         * triangle_area
         * (local_cosine_theta**2)
-        * np.exp(
-            -((normalized_correlation_distance * np.pi * local_sine_theta / wavelength_m) ** 2)
-        )
+        * np.exp(-((normalized_correlation_distance * np.pi * local_sine_theta / wavelength_m) ** 2))
     )
 
     es_local_x = local_surface_current_x * area_integral_value
@@ -1989,15 +1904,11 @@ def calculate_fields(
     ed_global_z = -sine_beta * ed_local_x
 
     scattered_theta = (
-        theta_projection_u * es_global_x
-        + theta_projection_v * es_global_y
-        + theta_projection_w * es_global_z
+        theta_projection_u * es_global_x + theta_projection_v * es_global_y + theta_projection_w * es_global_z
     )
     scattered_phi = -sine_phi * es_global_x + cosine_phi * es_global_y
     diffuse_theta = (
-        theta_projection_u * ed_global_x
-        + theta_projection_v * ed_global_y
-        + theta_projection_w * ed_global_z
+        theta_projection_u * ed_global_x + theta_projection_v * ed_global_y + theta_projection_w * ed_global_z
     )
     diffuse_phi = -sine_phi * ed_global_x + cosine_phi * ed_global_y
 
@@ -2025,25 +1936,20 @@ def calculate_sth_sph(
     theta_index: int,
     accumulated_diffuse_phi: float,
 ):
+    """Convert accumulated fields to RCS values (dB) at one sweep sample."""
     floor_power = np.finfo(np.float64).tiny
     theta_power = (
         4
         * np.pi
         * roughness_factor_primary
-        * (
-            np.abs(accumulated_theta_field) ** 2
-            + np.sqrt(1 - roughness_factor_primary**2) * accumulated_diffuse_theta
-        )
+        * (np.abs(accumulated_theta_field) ** 2 + np.sqrt(1 - roughness_factor_primary**2) * accumulated_diffuse_theta)
         / wavelength_m**2
     )
     phi_power = (
         4
         * np.pi
         * roughness_factor_primary
-        * (
-            np.abs(accumulated_phi_field) ** 2
-            + np.sqrt(1 - roughness_factor_primary**2) * accumulated_diffuse_phi
-        )
+        * (np.abs(accumulated_phi_field) ** 2 + np.sqrt(1 - roughness_factor_primary**2) * accumulated_diffuse_phi)
         / wavelength_m**2
     )
     rcs_theta_db[phi_index, theta_index] = 10 * np.log10(np.maximum(theta_power, floor_power))
@@ -2110,6 +2016,7 @@ def product_vector(
 
 
 def other_vector_components(phi_sample_count: int, theta_sample_count: int):
+    """Allocate per-sweep grids for angles, direction cosines, and RCS outputs."""
     phi = np.zeros((phi_sample_count, theta_sample_count), dtype=np.double)
     theta = np.zeros((phi_sample_count, theta_sample_count), dtype=np.double)
     U = np.zeros((phi_sample_count, theta_sample_count), dtype=np.double)

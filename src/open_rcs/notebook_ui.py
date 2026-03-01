@@ -64,9 +64,7 @@ def _rotation_matrix_xyz(roll_deg: float, pitch_deg: float, yaw_deg: float) -> n
     return cast(np.ndarray, rot_z @ rot_y @ rot_x)
 
 
-def _rotate_vertices(
-    vertices: np.ndarray, roll_deg: float, pitch_deg: float, yaw_deg: float
-) -> np.ndarray:
+def _rotate_vertices(vertices: np.ndarray, roll_deg: float, pitch_deg: float, yaw_deg: float) -> np.ndarray:
     """Rotate vertices around the mesh centroid."""
     if vertices.size == 0:
         return vertices
@@ -114,9 +112,7 @@ def _select_rcs_component(simulation_result: RcsComputationResult, component: st
         return simulation_result.rcs_theta_db
     if component == "phi":
         return simulation_result.rcs_phi_db
-    return cast(
-        np.ndarray, np.maximum(simulation_result.rcs_theta_db, simulation_result.rcs_phi_db)
-    )
+    return cast(np.ndarray, np.maximum(simulation_result.rcs_theta_db, simulation_result.rcs_phi_db))
 
 
 def _build_rcs_surface_xyz(
@@ -252,24 +248,16 @@ def build_plotly_figures(
             rcs_theta_cut,
             rcs_phi_cut,
         )
-        fig_2d.add_trace(
-            go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta")
-        )
-        fig_2d.add_trace(
-            go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi")
-        )
+        fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"))
+        fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi"))
         fig_2d.update_layout(
             title="RCS Cut (Polar)",
             polar=dict(angularaxis=dict(direction="counterclockwise", rotation=90)),
         )
     else:
-        fig_2d.add_trace(
-            go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta")
-        )
+        fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta"))
         fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi"))
-        fig_2d.update_layout(
-            title="RCS Cut (X-Y)", xaxis_title="Angle (deg)", yaxis_title="RCS (dBsm)"
-        )
+        fig_2d.update_layout(title="RCS Cut (X-Y)", xaxis_title="Angle (deg)", yaxis_title="RCS (dBsm)")
 
     if mesh_vertices is None or mesh_faces is None:
         mesh_vertices, mesh_faces = _load_mesh_vertices_faces(Path(stl_model_path))
@@ -329,8 +317,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
         from IPython.display import display
     except ImportError as exc:  # pragma: no cover - notebook runtime guard
         raise ImportError(
-            "Notebook UI requires 'ipywidgets' and 'plotly'. "
-            "Install them with: pip install ipywidgets plotly"
+            "Notebook UI requires 'ipywidgets' and 'plotly'. Install them with: pip install ipywidgets plotly"
         ) from exc
 
     project_path = Path(project_root).resolve()
@@ -405,10 +392,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
         button_style="info",
     )
     surface_guidance_widget = widgets.HTML(
-        value=(
-            "<span style='color:#555;'>Use <b>Suggest Surface Params</b> for analyst "
-            "starting values.</span>"
-        )
+        value=("<span style='color:#555;'>Use <b>Suggest Surface Params</b> for analyst starting values.</span>")
     )
     use_material_file_widget = widgets.Checkbox(
         value=bool(material_options),
@@ -611,9 +595,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
             return np.array([0.0, 0.0, 1.0], dtype=float)
         return incident_direction / norm
 
-    def _add_incident_wave_arrow(
-        fig: Any, mesh_center: np.ndarray, reference_radius: float
-    ) -> None:
+    def _add_incident_wave_arrow(fig: Any, mesh_center: np.ndarray, reference_radius: float) -> None:
         if mode_widget.value != "bistatic":
             return
         incident_direction = _incident_direction_unit()
@@ -801,21 +783,15 @@ def launch_rcs_widget(project_root: str | Path = "."):
         incident_angles_row.layout.display = "flex" if is_bistatic else "none"
 
     def _set_material_controls(*_) -> None:
-        material_file_widget.disabled = (not bool(use_material_file_widget.value)) or (
-            not bool(material_options)
-        )
+        material_file_widget.disabled = (not bool(use_material_file_widget.value)) or (not bool(material_options))
 
     def _update_material_summary(*_) -> None:
         if not bool(use_material_file_widget.value):
-            material_summary_widget.value = (
-                "<span style='color:#555;'>Material file usage is disabled.</span>"
-            )
+            material_summary_widget.value = "<span style='color:#555;'>Material file usage is disabled.</span>"
             return
         material_path = str(material_file_widget.value)
         if not material_path:
-            material_summary_widget.value = (
-                "<span style='color:#b22222;'>No material file selected.</span>"
-            )
+            material_summary_widget.value = "<span style='color:#b22222;'>No material file selected.</span>"
             return
         path = Path(material_path)
         if path.suffix.lower() not in {".rcsmat", ".yaml", ".yml"}:
@@ -827,13 +803,10 @@ def launch_rcs_widget(project_root: str | Path = "."):
             material_catalog = rf.load_material_catalog(path)
             material_ids = ", ".join(sorted(material_catalog.keys()))
             material_summary_widget.value = (
-                f"<span><b>Material catalog:</b> {len(material_catalog)} entries "
-                f"({material_ids})</span>"
+                f"<span><b>Material catalog:</b> {len(material_catalog)} entries ({material_ids})</span>"
             )
         except Exception as exc:
-            material_summary_widget.value = (
-                f"<span style='color:#b22222;'>Invalid material library: {exc}</span>"
-            )
+            material_summary_widget.value = f"<span style='color:#b22222;'>Invalid material library: {exc}</span>"
 
     def _suggest_surface_parameters(*_) -> None:
         try:
@@ -860,9 +833,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
                 f"<ul>{notes_html}</ul></div>"
             )
         except Exception as exc:
-            surface_guidance_widget.value = (
-                f"<span style='color:#b22222;'>Unable to estimate parameters: {exc}</span>"
-            )
+            surface_guidance_widget.value = f"<span style='color:#b22222;'>Unable to estimate parameters: {exc}</span>"
 
     def _run_simulation(*_) -> None:
         run_button.disabled = True
@@ -899,11 +870,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
             use_material_file = bool(use_material_file_widget.value) and bool(material_options)
             material = MaterialConfig(
                 resistivity_mode=float(rf.SPECIFIC_MATERIAL if use_material_file else 0),
-                material_path=str(
-                    material_file_widget.value
-                    if use_material_file
-                    else (project_path / "matrl.txt")
-                ),
+                material_path=str(material_file_widget.value if use_material_file else (project_path / "matrl.txt")),
             )
 
             progress_text_widget.value = "<span>Building geometry...</span>"
@@ -969,8 +936,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
             progress_bar.value = float(total_samples)
             progress_bar.bar_style = "success"
             progress_text_widget.value = (
-                f"<span>Completed in {total_elapsed_seconds:.1f}s "
-                f"for {total_samples} angle samples.</span>"
+                f"<span>Completed in {total_elapsed_seconds:.1f}s for {total_samples} angle samples.</span>"
             )
 
             if state["mesh_vertices"] is None or state["mesh_faces"] is None:
@@ -1003,25 +969,15 @@ def launch_rcs_widget(project_root: str | Path = "."):
                     rcs_theta_cut,
                     rcs_phi_cut,
                 )
-                fig_2d.add_trace(
-                    go.Scatterpolar(
-                        theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"
-                    )
-                )
-                fig_2d.add_trace(
-                    go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi")
-                )
+                fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"))
+                fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi"))
                 fig_2d.update_layout(
                     title="RCS Cut (Polar)",
                     polar=dict(angularaxis=dict(direction="counterclockwise", rotation=90)),
                 )
             else:
-                fig_2d.add_trace(
-                    go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta")
-                )
-                fig_2d.add_trace(
-                    go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi")
-                )
+                fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta"))
+                fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi"))
                 fig_2d.update_layout(
                     title="RCS Cut (X-Y)",
                     xaxis_title="Angle (deg)",
@@ -1155,9 +1111,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
     controls = widgets.VBox(
         [
             widgets.HBox([mode_widget, model_widget, run_button]),
-            widgets.HBox(
-                [freq_widget, corr_widget, std_widget, pol_widget, suggest_surface_params_button]
-            ),
+            widgets.HBox([freq_widget, corr_widget, std_widget, pol_widget, suggest_surface_params_button]),
             surface_guidance_widget,
             widgets.HBox([use_material_file_widget, material_file_widget]),
             material_summary_widget,

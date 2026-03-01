@@ -1,3 +1,5 @@
+"""Tests for RCS math helper functions and plotting edge cases."""
+
 from __future__ import annotations
 
 import math
@@ -10,6 +12,7 @@ from open_rcs import rcs_functions as rf
 
 
 def test_polarization_and_angle_helper_functions() -> None:
+    """Verify polarization decoding and spherical-angle helpers return sane values."""
     label_tm, electric_theta_tm, electric_phi_tm = rf.get_polarization(0)
     label_te, electric_theta_te, electric_phi_te = rf.get_polarization(1)
     assert label_tm == "TM-z"
@@ -41,6 +44,7 @@ def test_polarization_and_angle_helper_functions() -> None:
 
 
 def test_sampling_and_global_angle_builders() -> None:
+    """Verify sweep allocators and global-angle builders produce consistent arrays."""
     triangle_areas, alpha, beta, normals, edges, phi_count, theta_count = rf.calculate_values(
         pstart=0.0,
         pstop=0.0,
@@ -118,6 +122,7 @@ def test_sampling_and_global_angle_builders() -> None:
 
 
 def test_reflection_coefficients_and_area_integral_branches() -> None:
+    """Verify reflection and area-integral branches return finite complex values."""
     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
         rs=0.2,
         index=0,
@@ -158,6 +163,7 @@ def test_reflection_coefficients_and_area_integral_branches() -> None:
 
 
 def test_refl_coeff_total_internal_reflection_branch() -> None:
+    """Verify Fresnel helper marks total internal reflection in the TIR branch."""
     _gamma_parallel, _gamma_perpendicular, _theta_transmitted, tir_flag = rf.refl_coeff(
         er1=4.0,
         mr1=1.0,
@@ -169,6 +175,7 @@ def test_refl_coeff_total_internal_reflection_branch() -> None:
 
 
 def test_final_plot_single_sample_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify single-sample plotting branches create an output image without errors."""
     monkeypatch.setattr(rf, "RESULTS_DIR", tmp_path)
     theta_grid_deg = np.array([[15.0]], dtype=float)
     phi_grid_deg = np.array([[20.0]], dtype=float)

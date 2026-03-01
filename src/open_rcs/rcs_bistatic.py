@@ -63,9 +63,7 @@ def simulate_bistatic(
         normalized_correlation_distance,
         wavelength_m,
     )
-    _, electric_theta_component, electric_phi_component = rf.get_polarization(
-        simulation_config.incident_polarization
-    )
+    _, electric_theta_component, electric_phi_component = rf.get_polarization(simulation_config.incident_polarization)
     incident_amplitude = 1.0
 
     (
@@ -405,8 +403,7 @@ def simulate_bistatic(
                         - local_field_z * sine_local_incident_theta
                     )
                     local_phi_field = (
-                        -local_field_x * sine_local_incident_phi
-                        + local_field_y * cosine_local_incident_phi
+                        -local_field_x * sine_local_incident_phi + local_field_y * cosine_local_incident_phi
                     )
 
                     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
@@ -486,9 +483,7 @@ def simulate_bistatic(
                 accumulated_fields.diffuse_phi,
             )
             completed_samples += 1
-            if progress_callback and (
-                completed_samples % callback_stride == 0 or completed_samples == total_samples
-            ):
+            if progress_callback and (completed_samples % callback_stride == 0 or completed_samples == total_samples):
                 progress_callback(completed_samples, total_samples)
 
     return RcsComputationResult(
@@ -512,9 +507,7 @@ def run_bistatic(
 ) -> SolverResult:
     """Run bistatic simulation and persist standard artifacts to disk."""
     simulation_result = simulate_bistatic(simulation_config, geometry_data)
-    rcs_max_db, rcs_min_db = rf.plot_limits(
-        simulation_result.rcs_theta_db, simulation_result.rcs_phi_db
-    )
+    rcs_max_db, rcs_min_db = rf.plot_limits(simulation_result.rcs_theta_db, simulation_result.rcs_phi_db)
     polarization_label = rf.get_polarization(simulation_config.incident_polarization)[0]
 
     rf.set_font_option()

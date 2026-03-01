@@ -1,3 +1,5 @@
+"""Tests for material parsing and reflection coefficient behavior."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -9,6 +11,7 @@ from open_rcs import rcs_functions as rf
 
 
 def test_material_roundtrip_and_pec_reflection() -> None:
+    """Verify material text parsing round-trips and PEC returns -1 reflection."""
     rows = [
         "PEC,plate\n",
         "Composite,skin,2.0,1.0,0.01,0.02,0.03\n",
@@ -37,6 +40,7 @@ def test_material_roundtrip_and_pec_reflection() -> None:
 
 
 def test_get_entries_from_material_file_validates_count(tmp_path: Path) -> None:
+    """Verify loader enforces material-row count to match triangle count."""
     material_path = tmp_path / "materials.txt"
     rf.save_list_in_file([["PEC", "facet_0"]], str(material_path))
 
@@ -48,6 +52,7 @@ def test_get_entries_from_material_file_validates_count(tmp_path: Path) -> None:
 
 
 def test_reflection_models_return_finite_values() -> None:
+    """Verify all supported material models yield finite reflection coefficients."""
     test_cases = [
         ["Composite", "single", [2.5, 0.02, 1.0, 0.01, 1.5]],
         ["Composite Layer on PEC", "single-pec", [2.5, 0.02, 1.0, 0.01, 1.5]],
@@ -80,6 +85,7 @@ def test_reflection_models_return_finite_values() -> None:
 
 
 def test_coordinate_transforms_and_phase_helpers_are_consistent() -> None:
+    """Verify coordinate transforms and phase helpers are numerically consistent."""
     spherical = np.array([1.0, 0.6, -0.4], dtype=float)
     cartesian = rf.spher2cart(spherical)
     reconstructed_spherical = rf.cart2spher(cartesian)
@@ -109,9 +115,7 @@ def test_coordinate_transforms_and_phase_helpers_are_consistent() -> None:
     wave_number = 2.0
     direction_u, direction_v, direction_w = 0.2, 0.3, 0.9
     incident_u, incident_v, incident_w = -0.1, 0.4, 0.8
-    direct_phase = rf.phase_vertex_triangle(
-        x, y, z, vind, wave_number, 0, direction_u, direction_v, direction_w
-    )
+    direct_phase = rf.phase_vertex_triangle(x, y, z, vind, wave_number, 0, direction_u, direction_v, direction_w)
     precomputed_phase = rf.phase_vertex_triangle_precomputed(
         wave_number=wave_number,
         phase_p_vectors=np.array([[0.0, -1.0, 0.0]], dtype=float),
@@ -155,6 +159,7 @@ def test_coordinate_transforms_and_phase_helpers_are_consistent() -> None:
 
 
 def test_get_reflection_coeff_from_material_rejects_unknown_type() -> None:
+    """Verify unknown material types are rejected with a ValueError."""
     with pytest.raises(ValueError):
         rf.get_reflection_coeff_from_material(
             thri=0.1,

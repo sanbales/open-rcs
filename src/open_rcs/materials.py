@@ -1,3 +1,5 @@
+"""Material-library parsing and reflection-coefficient models for Open RCS."""
+
 from __future__ import annotations
 
 import cmath
@@ -32,9 +34,7 @@ def compile_material_lookup_arrays(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Convert heterogeneous material entries into dense numeric arrays for fast kernels."""
     facet_count = len(material_table)
-    max_layers = max(
-        (len(entry) - MaterialEntryIndex.FIRST_LAYER for entry in material_table), default=0
-    )
+    max_layers = max((len(entry) - MaterialEntryIndex.FIRST_LAYER for entry in material_table), default=0)
     max_layers = max(1, max_layers)
 
     material_type_codes = np.zeros(facet_count, dtype=np.int32)
@@ -129,9 +129,7 @@ def _clone_material_entry(material_entry: MaterialEntry) -> MaterialEntry:
     return cloned_entry
 
 
-def _material_entry_from_yaml(
-    material_definition: dict[str, Any], index: int
-) -> tuple[str, MaterialEntry]:
+def _material_entry_from_yaml(material_definition: dict[str, Any], index: int) -> tuple[str, MaterialEntry]:
     material_id = str(material_definition.get("id", "")).strip()
     if not material_id:
         raise ValueError(f"materials[{index}] is missing a non-empty 'id'.")
@@ -168,16 +166,12 @@ def _parse_facet_selector(selector: Any, ntria: int, context: str) -> set[int]:
             if stop < start:
                 start, stop = stop, start
             if start < 1 or stop > ntria:
-                raise ValueError(
-                    f"{context}: range [{start}, {stop}] is outside valid facet IDs 1..{ntria}."
-                )
+                raise ValueError(f"{context}: range [{start}, {stop}] is outside valid facet IDs 1..{ntria}.")
             selected_facets.update(range(start - 1, stop))
         else:
             facet_id = int(item)
             if facet_id < 1 or facet_id > ntria:
-                raise ValueError(
-                    f"{context}: facet ID {facet_id} is outside valid range 1..{ntria}."
-                )
+                raise ValueError(f"{context}: facet ID {facet_id} is outside valid range 1..{ntria}.")
             selected_facets.add(facet_id - 1)
     return selected_facets
 
@@ -241,16 +235,11 @@ def _resolve_assignment_selector(
             explicit_selector_used = True
             raw_names = assignment[key]
             if not isinstance(raw_names, list):
-                raise ValueError(
-                    f"assignments[{assignment_index}].{key} must be a list of tag names."
-                )
+                raise ValueError(f"assignments[{assignment_index}].{key} must be a list of tag names.")
             for raw_name in raw_names:
                 tag_name = str(raw_name)
                 if tag_name not in parsed_tags:
-                    raise ValueError(
-                        f"assignments[{assignment_index}].{key} references "
-                        f"unknown tag '{tag_name}'."
-                    )
+                    raise ValueError(f"assignments[{assignment_index}].{key} references unknown tag '{tag_name}'.")
                 selection.update(parsed_tags[tag_name])
 
     if not explicit_selector_used:
@@ -300,9 +289,7 @@ def _material_table_from_yaml_document(document: dict[str, Any], ntria: int) -> 
         if not material_id:
             raise ValueError(f"assignments[{assignment_index}] is missing 'material'.")
         if material_id not in material_catalog:
-            raise ValueError(
-                f"assignments[{assignment_index}] references unknown material id '{material_id}'."
-            )
+            raise ValueError(f"assignments[{assignment_index}] references unknown material id '{material_id}'.")
         selected_facets = _resolve_assignment_selector(
             raw_assignment,
             ntria,
@@ -313,16 +300,12 @@ def _material_table_from_yaml_document(document: dict[str, Any], ntria: int) -> 
             facet_material_ids[facet_index] = material_id
 
     missing_facets = [
-        index + 1
-        for index, assigned_material_id in enumerate(facet_material_ids)
-        if assigned_material_id is None
+        index + 1 for index, assigned_material_id in enumerate(facet_material_ids) if assigned_material_id is None
     ]
     if missing_facets:
         preview = ", ".join(str(value) for value in missing_facets[:10])
         suffix = "..." if len(missing_facets) > 10 else ""
-        raise ValueError(
-            f"YAML material assignments are incomplete. Missing facet IDs: {preview}{suffix}"
-        )
+        raise ValueError(f"YAML material assignments are incomplete. Missing facet IDs: {preview}{suffix}")
 
     material_table: MaterialTable = []
     for assigned_material_id in facet_material_ids:
@@ -368,11 +351,10 @@ def _load_material_table_from_yaml(material_path: str | Path, ntria: int) -> Mat
 
 
 def save_list_in_file(material_rows: list, output_file: str) -> None:
+    """Write parsed material entries to the legacy CSV-like text format."""
     serialized_rows = []
     for row in material_rows:
-        entry_str = (
-            str(row[MaterialEntryIndex.TYPE]) + "," + str(row[MaterialEntryIndex.DESCRIPTION])
-        )
+        entry_str = str(row[MaterialEntryIndex.TYPE]) + "," + str(row[MaterialEntryIndex.DESCRIPTION])
         for layer in row[MaterialEntryIndex.FIRST_LAYER :]:
             for i in range(len(layer)):
                 entry_str = entry_str + "," + str(layer[i])
@@ -384,6 +366,7 @@ def save_list_in_file(material_rows: list, output_file: str) -> None:
 
 
 def get_entries_from_material_file(ntria: int, matrlpath: str) -> MaterialTable:
+    """Load material entries from text or YAML and validate facet count alignment."""
     material_path = Path(matrlpath)
     try:
         if material_path.suffix.lower() in {".rcsmat", ".yaml", ".yml"}:
@@ -403,11 +386,13 @@ def get_entries_from_material_file(ntria: int, matrlpath: str) -> MaterialTable:
 
 
 def get_material_properties_from_file(rows: Iterable[str]) -> MaterialTable:
+    """Parse material entries from an iterable of text rows."""
     material_text_rows = list(rows)
     return convert_material_textlist_to_list(material_text_rows)
 
 
 def convert_material_textlist_to_list(text_rows: Iterable[str]) -> MaterialTable:
+    """Convert legacy comma-separated material rows into structured entries."""
     material_table: MaterialTable = []
     for raw_row in text_rows:
         raw_row = raw_row.strip()
@@ -430,20 +415,18 @@ def convert_material_textlist_to_list(text_rows: Iterable[str]) -> MaterialTable
 
 
 def rotation_transform_matrix(alpha, beta):
-    T1 = np.array(
-        [[np.cos(alpha), np.sin(alpha), 0], [-np.sin(alpha), np.cos(alpha), 0], [0, 0, 1]]
-    )
+    """Build the global-to-local rotation matrix from facet alpha/beta angles."""
+    T1 = np.array([[np.cos(alpha), np.sin(alpha), 0], [-np.sin(alpha), np.cos(alpha), 0], [0, 0, 1]])
     T2 = np.array([[np.cos(beta), 0, -np.sin(beta)], [0, 1, 0], [np.sin(beta), 0, np.cos(beta)]])
     return np.dot(T2, T1)
 
 
 def refl_coeff(er1, mr1, er2, mr2, thetai):
+    """Compute Fresnel reflection coefficients at an interface between two media."""
     m0 = 4 * np.pi * 1e-7
     e0 = 8.854e-12
     TIR = 0
-    sinthetat = np.sin(thetai) * np.sqrt(
-        np.real(er1) * np.real(mr1) / (np.real(er2) * np.real(mr2))
-    )
+    sinthetat = np.sin(thetai) * np.sqrt(np.real(er1) * np.real(mr1) / (np.real(er2) * np.real(mr2)))
     if sinthetat > 1:
         TIR = 1
         thetat = np.pi / 2
@@ -452,16 +435,13 @@ def refl_coeff(er1, mr1, er2, mr2, thetai):
 
     n1 = np.sqrt(mr1 * m0 / (er1 * e0))
     n2 = np.sqrt(mr2 * m0 / (er2 * e0))
-    gammaperp = (n2 * np.cos(thetai) - n1 * np.cos(thetat)) / (
-        n2 * np.cos(thetai) + n1 * np.cos(thetat)
-    )
-    gammapar = (n2 * np.cos(thetat) - n1 * np.cos(thetai)) / (
-        n2 * np.cos(thetat) + n1 * np.cos(thetai)
-    )
+    gammaperp = (n2 * np.cos(thetai) - n1 * np.cos(thetat)) / (n2 * np.cos(thetai) + n1 * np.cos(thetat))
+    gammapar = (n2 * np.cos(thetat) - n1 * np.cos(thetai)) / (n2 * np.cos(thetat) + n1 * np.cos(thetai))
     return gammapar, gammaperp, thetat, TIR
 
 
 def spher2cart(spherical_vector: np.ndarray) -> np.ndarray:
+    """Convert a spherical vector ``[r, theta, phi]`` to Cartesian coordinates."""
     radius = float(spherical_vector[0])
     theta = float(spherical_vector[1])
     phi = float(spherical_vector[2])
@@ -472,6 +452,7 @@ def spher2cart(spherical_vector: np.ndarray) -> np.ndarray:
 
 
 def cart2spher(cart_vector: np.ndarray) -> np.ndarray:
+    """Convert a Cartesian vector ``[x, y, z]`` to spherical coordinates."""
     x = float(cart_vector[0])
     y = float(cart_vector[1])
     z = float(cart_vector[2])
@@ -485,6 +466,7 @@ def spherical_global_to_local(
     spherical_vector: np.ndarray,
     transform_matrix_global_to_local: np.ndarray,
 ) -> np.ndarray:
+    """Apply a rotation to a spherical vector via Cartesian conversion."""
     cartesian_vector = spher2cart(spherical_vector)
     cartesian_vector = np.dot(transform_matrix_global_to_local, cartesian_vector)
     return cart2spher(cartesian_vector)
@@ -562,6 +544,7 @@ def refl_coeff_composite(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
+    """Compute reflection coefficients for a single composite layer in free space."""
     layer = cast(list[float], matrlLine[MaterialEntryIndex.FIRST_LAYER])
     local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
 
@@ -614,6 +597,7 @@ def refl_coeff_composite_layer_on_pec(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
+    """Compute reflection coefficients for layered composite backed by PEC."""
     layers = cast(list[list[float]], matrlLine[MaterialEntryIndex.FIRST_LAYER :])
     local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
     sine_incidence = math.sin(local_incidence_theta)
@@ -651,12 +635,8 @@ def refl_coeff_composite_layer_on_pec(
         tau_perpendicular = 1.0 + gamma_perpendicular
         phase = beta_0 * thickness_m * cmath.sqrt(epsilon_complex * mu_complex - sine_incidence**2)
 
-        w00p, w01p, w10p, w11p = _apply_transfer_matrix(
-            w00p, w01p, w10p, w11p, gamma_parallel, phase
-        )
-        w00s, w01s, w10s, w11s = _apply_transfer_matrix(
-            w00s, w01s, w10s, w11s, gamma_perpendicular, phase
-        )
+        w00p, w01p, w10p, w11p = _apply_transfer_matrix(w00p, w01p, w10p, w11p, gamma_parallel, phase)
+        w00s, w01s, w10s, w11s = _apply_transfer_matrix(w00s, w01s, w10s, w11s, gamma_perpendicular, phase)
         inverse_tau_parallel = 1.0 / tau_parallel
         inverse_tau_perpendicular = 1.0 / tau_perpendicular
         w00p *= inverse_tau_parallel
@@ -682,6 +662,7 @@ def refl_coeff_multi_layers(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
+    """Compute reflection coefficients for multiple dielectric/magnetic layers."""
     layers = cast(list[list[float]], matrlLine[MaterialEntryIndex.FIRST_LAYER :])
     local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
 
@@ -705,9 +686,7 @@ def refl_coeff_multi_layers(
 
         wave_speed = 3e8 / math.sqrt(np.real(epsilon_complex) * np.real(mu_complex))
         last_phase = 2.0 * math.pi * thickness_m / (wave_speed / freq)
-        m00p, m01p, m10p, m11p = _apply_transfer_matrix(
-            m00p, m01p, m10p, m11p, complex(gamma_parallel), last_phase
-        )
+        m00p, m01p, m10p, m11p = _apply_transfer_matrix(m00p, m01p, m10p, m11p, complex(gamma_parallel), last_phase)
         m00s, m01s, m10s, m11s = _apply_transfer_matrix(
             m00s, m01s, m10s, m11s, complex(gamma_perpendicular), last_phase
         )
@@ -718,9 +697,7 @@ def refl_coeff_multi_layers(
     gamma_parallel_exit, gamma_perpendicular_exit, _theta_exit, _tir = refl_coeff(
         previous_epsilon, previous_mu, 1.0 + 0j, 1.0 + 0j, previous_theta
     )
-    m00p, m01p, m10p, m11p = _apply_transfer_matrix(
-        m00p, m01p, m10p, m11p, complex(gamma_parallel_exit), last_phase
-    )
+    m00p, m01p, m10p, m11p = _apply_transfer_matrix(m00p, m01p, m10p, m11p, complex(gamma_parallel_exit), last_phase)
     m00s, m01s, m10s, m11s = _apply_transfer_matrix(
         m00s, m01s, m10s, m11s, complex(gamma_perpendicular_exit), last_phase
     )
@@ -738,6 +715,7 @@ def refl_coeff_multi_layers_on_pec(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
+    """Compute reflection coefficients for multi-layer stacks backed by PEC."""
     return refl_coeff_composite_layer_on_pec(
         thri=thri,
         phrii=phrii,
@@ -758,6 +736,7 @@ def get_reflection_coeff_from_material(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
+    """Dispatch reflection calculation based on a single facet material entry."""
     reflection_perpendicular: complex = 0.0 + 0.0j
     reflection_parallel: complex = 0.0 + 0.0j
 
@@ -798,6 +777,7 @@ def reflection_coefficients(
     matrl: list,
     local_cos_theta: float | None = None,
 ) -> tuple[complex, complex]:
+    """Return facet reflection coefficients for resistive or material-specific modes."""
     reflection_perpendicular: complex = 0.0 + 0.0j
     reflection_parallel: complex = 0.0 + 0.0j
     if rs == SPECIFIC_MATERIAL:

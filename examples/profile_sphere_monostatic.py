@@ -18,6 +18,7 @@ from open_rcs import (
 
 
 def run_profile(project_root: str | Path = ".") -> str:
+    """Run a monostatic sphere profile and return the raw profiler report text."""
     root = Path(project_root).resolve()
     model_path = root / "stl_models" / "sphere.stl"
 

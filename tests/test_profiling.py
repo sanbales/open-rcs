@@ -1,3 +1,5 @@
+"""Tests for simulation profiling helpers and report generation."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,6 +20,7 @@ DUMMY_MATERIAL_PATH = str(REPO_ROOT / "matrl.txt")
 
 
 def test_profile_monostatic_writes_report_file(tmp_path: Path) -> None:
+    """Verify monostatic profiling writes a report file and returns matching text."""
     config = MonostaticSimulationConfig(
         input_model="plate.stl",
         frequency_hz=10.0e9,
@@ -57,6 +60,7 @@ def test_profile_monostatic_writes_report_file(tmp_path: Path) -> None:
 
 
 def test_profile_bistatic_without_output_path() -> None:
+    """Verify bistatic profiling returns text when file output is disabled."""
     config = BistaticSimulationConfig(
         input_model="plate.stl",
         frequency_hz=10.0e9,
@@ -88,6 +92,7 @@ def test_profile_bistatic_without_output_path() -> None:
 
 
 def test_profile_bistatic_writes_report_file(tmp_path: Path) -> None:
+    """Verify bistatic profiling writes report text to the requested output path."""
     config = BistaticSimulationConfig(
         input_model="plate.stl",
         frequency_hz=10.0e9,

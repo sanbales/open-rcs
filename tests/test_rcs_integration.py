@@ -1,3 +1,5 @@
+"""Integration tests for monostatic and bistatic RCS solver workflows."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -95,6 +97,7 @@ def _make_bistatic_config(*, use_numba: bool) -> BistaticSimulationConfig:
 
 
 def test_build_geometry_from_stl_consistent_shapes() -> None:
+    """Verify STL geometry conversion returns internally consistent array shapes."""
     geometry_data = build_geometry_from_stl(PLATE_STL, rs_value=0.2)
 
     assert geometry_data.n_vertices > 0
@@ -108,6 +111,7 @@ def test_build_geometry_from_stl_consistent_shapes() -> None:
 
 
 def test_simulate_monostatic_returns_finite_rcs_grid() -> None:
+    """Verify monostatic simulation returns finite 2D RCS grids."""
     config = _make_monostatic_config(use_numba=False)
     geometry_data = build_geometry_from_stl(PLATE_STL, config.material.resistivity_mode)
     result = simulate_monostatic(config, geometry_data)
@@ -120,6 +124,7 @@ def test_simulate_monostatic_returns_finite_rcs_grid() -> None:
 
 
 def test_simulate_bistatic_returns_finite_rcs_grid() -> None:
+    """Verify bistatic simulation returns finite 2D RCS grids."""
     config = _make_bistatic_config(use_numba=False)
     geometry_data = build_geometry_from_stl(PLATE_STL, config.material.resistivity_mode)
     result = simulate_bistatic(config, geometry_data)
@@ -133,6 +138,7 @@ def test_simulate_bistatic_returns_finite_rcs_grid() -> None:
 
 @pytest.mark.skipif(not rf.NUMBA_AVAILABLE, reason="Numba is not available in this environment.")
 def test_monostatic_numba_matches_python_path() -> None:
+    """Verify monostatic numba and python paths produce equivalent RCS outputs."""
     python_config = _make_monostatic_config(use_numba=False)
     numba_config = _make_monostatic_config(use_numba=True)
     geometry_data = build_geometry_from_stl(PLATE_STL, python_config.material.resistivity_mode)
@@ -146,6 +152,7 @@ def test_monostatic_numba_matches_python_path() -> None:
 
 @pytest.mark.skipif(not rf.NUMBA_AVAILABLE, reason="Numba is not available in this environment.")
 def test_bistatic_numba_matches_python_path() -> None:
+    """Verify bistatic numba and python paths produce equivalent RCS outputs."""
     python_config = _make_bistatic_config(use_numba=False)
     numba_config = _make_bistatic_config(use_numba=True)
     geometry_data = build_geometry_from_stl(PLATE_STL, python_config.material.resistivity_mode)

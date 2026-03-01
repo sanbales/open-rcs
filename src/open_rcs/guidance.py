@@ -51,9 +51,7 @@ def estimate_roughness_correlation_guidance(
 
     edge_lengths = _triangle_edge_lengths(geometry_data)
     positive_edge_lengths = edge_lengths[edge_lengths > 0]
-    median_edge_length_m = (
-        float(np.median(positive_edge_lengths)) if positive_edge_lengths.size else wavelength_m
-    )
+    median_edge_length_m = float(np.median(positive_edge_lengths)) if positive_edge_lengths.size else wavelength_m
 
     sigma_min = wavelength_m / 1000.0
     sigma_max = wavelength_m / 50.0
@@ -69,20 +67,12 @@ def estimate_roughness_correlation_guidance(
         "Use these values as a starting point, then calibrate against known references.",
     ]
     if electrical_size < 10.0:
-        notes.append(
-            "Target appears electrically small (L/lambda < 10). "
-            "PO approximation may be less accurate."
-        )
+        notes.append("Target appears electrically small (L/lambda < 10). PO approximation may be less accurate.")
     edge_to_wavelength = median_edge_length_m / wavelength_m if wavelength_m > 0 else 0.0
     if edge_to_wavelength < 2.5:
-        notes.append(
-            "Median facet edge is relatively fine (< 2.5 lambda). "
-            "Runtime may increase significantly."
-        )
+        notes.append("Median facet edge is relatively fine (< 2.5 lambda). Runtime may increase significantly.")
     elif edge_to_wavelength > 4.5:
-        notes.append(
-            "Median facet edge is relatively coarse (> 4.5 lambda). Facet noise risk may increase."
-        )
+        notes.append("Median facet edge is relatively coarse (> 4.5 lambda). Facet noise risk may increase.")
 
     return RoughnessCorrelationGuidance(
         wavelength_m=wavelength_m,

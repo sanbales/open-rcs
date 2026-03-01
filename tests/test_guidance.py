@@ -1,3 +1,5 @@
+"""Tests for roughness and correlation guidance utilities."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -12,6 +14,7 @@ PLATE_STL = REPO_ROOT / "stl_models" / "plate.stl"
 
 
 def test_estimate_roughness_correlation_guidance_returns_bounded_values() -> None:
+    """Verify guidance outputs remain within computed physical bounds."""
     geometry_data = build_geometry_from_stl(PLATE_STL, rs_value=0.0)
     guidance = estimate_roughness_correlation_guidance(
         frequency_hz=10.0e9,
@@ -29,6 +32,7 @@ def test_estimate_roughness_correlation_guidance_returns_bounded_values() -> Non
 
 
 def test_estimate_roughness_correlation_guidance_invalid_frequency_raises() -> None:
+    """Verify non-positive frequency inputs raise a validation error."""
     geometry_data = build_geometry_from_stl(PLATE_STL, rs_value=0.0)
     try:
         estimate_roughness_correlation_guidance(0.0, geometry_data)
@@ -39,6 +43,7 @@ def test_estimate_roughness_correlation_guidance_invalid_frequency_raises() -> N
 
 
 def test_estimate_roughness_correlation_guidance_small_target_note() -> None:
+    """Verify notes include electrically-small guidance for tiny targets."""
     vertices = np.array(
         [
             [0.0, 0.0, 0.0],
