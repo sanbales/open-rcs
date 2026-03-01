@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -154,3 +155,42 @@ def test_reflection_coefficients_and_area_integral_branches() -> None:
         )
         assert np.isfinite(np.real(area_integral))
         assert np.isfinite(np.imag(area_integral))
+
+
+def test_refl_coeff_total_internal_reflection_branch() -> None:
+    _gamma_parallel, _gamma_perpendicular, _theta_transmitted, tir_flag = rf.refl_coeff(
+        er1=4.0,
+        mr1=1.0,
+        er2=1.0,
+        mr2=1.0,
+        thetai=1.0,
+    )
+    assert tir_flag == 1
+
+
+def test_final_plot_single_sample_branches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(rf, "RESULTS_DIR", tmp_path)
+    theta_grid_deg = np.array([[15.0]], dtype=float)
+    phi_grid_deg = np.array([[20.0]], dtype=float)
+    rcs_theta_db = np.array([[1.0]], dtype=float)
+    rcs_phi_db = np.array([[0.5]], dtype=float)
+    direction_u = np.array([[0.0]], dtype=float)
+    direction_v = np.array([[0.0]], dtype=float)
+
+    plot_path = rf.final_plot(
+        phi_sample_count=1,
+        theta_sample_count=1,
+        phi_grid_deg=phi_grid_deg,
+        wavelength_m=0.03,
+        theta_grid_deg=theta_grid_deg,
+        rcs_min_db=-10.0,
+        rcs_max_db=10.0,
+        rcs_theta_db=rcs_theta_db,
+        rcs_phi_db=rcs_phi_db,
+        direction_cosine_u_grid=direction_u,
+        direction_cosine_v_grid=direction_v,
+        timestamp="unit-test",
+        input_model="plate.stl",
+        mode="Monostatic",
+    )
+    assert Path(plot_path).exists()

@@ -1,0 +1,40 @@
+version: 1
+default_material: aluminum_painted
+
+materials:
+  - id: pec
+    type: PEC
+    description: Perfect electric conductor reference.
+
+  - id: aluminum_painted
+    type: Composite
+    description: Simple painted aluminum approximation (single dielectric layer).
+    layers:
+      - epsilon_r: 2.8
+        loss_tangent: 0.02
+        mu_r_real: 1.0
+        mu_r_imag: 0.0
+        thickness_mm: 0.25
+
+  - id: absorber_panel
+    type: Composite Layer on PEC
+    description: Generic absorber over conductive backing.
+    layers:
+      - epsilon_r: 10.0
+        loss_tangent: 0.20
+        mu_r_real: 1.2
+        mu_r_imag: 0.1
+        thickness_mm: 3.0
+
+assignments:
+  - material: aluminum_painted
+    facets: all
+
+# Example tag/group usage (commented):
+# tags:
+#   nose: [[1, 120]]
+# assignments:
+#   - material: aluminum_painted
+#     facets: all
+#   - material: absorber_panel
+#     groups: [nose]

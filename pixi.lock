@@ -7166,11 +7166,12 @@ packages:
 - pypi: ./
   name: open-rcs
   version: 0.1.0
-  sha256: 5638c55e8fa102b049e85210499850e3b86184fa551d8cf15b75ea587ca9918a
+  sha256: 33b99d6396c6ad957b12a842abe60e612098ac3db90cdf00c636b04333436229
   requires_dist:
-  - numpy>=2.1.0
-  - numpy-stl>=3.1.2
   - matplotlib>=3.9.0
+  - numpy-stl>=3.1.2
+  - numpy>=2.1.0
+  - pyyaml>=6.0
   - build ; extra == 'dev'
   - ipykernel ; extra == 'dev'
   - isort ; extra == 'dev'

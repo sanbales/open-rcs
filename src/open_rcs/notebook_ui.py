@@ -10,6 +10,7 @@ import numpy as np
 from stl import mesh
 
 from . import rcs_functions as rf
+from .guidance import estimate_roughness_correlation_guidance
 from .model_types import (
     AngleSweep,
     BistaticSimulationConfig,
@@ -398,6 +399,17 @@ def launch_rcs_widget(project_root: str | Path = "."):
         description="Polarization:",
         tooltip="Incident wave polarization.\nTM-z: Theta Polarization\nTE-z: Phi Polarization",
     )
+    suggest_surface_params_button = widgets.Button(
+        description="Suggest Surface Params",
+        tooltip=("Estimate roughness and correlation distance from geometry scale and wavelength."),
+        button_style="info",
+    )
+    surface_guidance_widget = widgets.HTML(
+        value=(
+            "<span style='color:#555;'>Use <b>Suggest Surface Params</b> for analyst "
+            "starting values.</span>"
+        )
+    )
     use_material_file_widget = widgets.Checkbox(
         value=bool(material_options),
         description="Use material file",
@@ -410,6 +422,9 @@ def launch_rcs_widget(project_root: str | Path = "."):
         description="Material:",
         tooltip="Select a material file. Preferred extension: .rcsmat",
         disabled=not bool(material_options),
+    )
+    material_summary_widget = widgets.HTML(
+        value="<span style='color:#555;'>Select a material file to view catalog details.</span>"
     )
 
     phi_range_widget = widgets.FloatRangeSlider(
@@ -790,6 +805,65 @@ def launch_rcs_widget(project_root: str | Path = "."):
             not bool(material_options)
         )
 
+    def _update_material_summary(*_) -> None:
+        if not bool(use_material_file_widget.value):
+            material_summary_widget.value = (
+                "<span style='color:#555;'>Material file usage is disabled.</span>"
+            )
+            return
+        material_path = str(material_file_widget.value)
+        if not material_path:
+            material_summary_widget.value = (
+                "<span style='color:#b22222;'>No material file selected.</span>"
+            )
+            return
+        path = Path(material_path)
+        if path.suffix.lower() not in {".rcsmat", ".yaml", ".yml"}:
+            material_summary_widget.value = (
+                "<span style='color:#555;'>Legacy per-facet text material file selected.</span>"
+            )
+            return
+        try:
+            material_catalog = rf.load_material_catalog(path)
+            material_ids = ", ".join(sorted(material_catalog.keys()))
+            material_summary_widget.value = (
+                f"<span><b>Material catalog:</b> {len(material_catalog)} entries "
+                f"({material_ids})</span>"
+            )
+        except Exception as exc:
+            material_summary_widget.value = (
+                f"<span style='color:#b22222;'>Invalid material library: {exc}</span>"
+            )
+
+    def _suggest_surface_parameters(*_) -> None:
+        try:
+            frequency_hz = float(freq_widget.value) * 1e9
+            guidance_geometry = rf.build_geometry_from_stl(
+                model_dir / model_widget.value,
+                0.0,
+            )
+            guidance = estimate_roughness_correlation_guidance(frequency_hz, guidance_geometry)
+            corr_widget.value = float(guidance.suggested_correlation_distance_m)
+            std_widget.value = float(guidance.suggested_standard_deviation_m)
+            notes_html = "".join(f"<li>{note}</li>" for note in guidance.notes)
+            surface_guidance_widget.value = (
+                "<div style='font-size:12px;'>"
+                f"<b>Suggested sigma:</b> {guidance.suggested_standard_deviation_m:.3e} m "
+                f"(range {guidance.standard_deviation_bounds_m[0]:.3e} - "
+                f"{guidance.standard_deviation_bounds_m[1]:.3e})<br>"
+                f"<b>Suggested correlation:</b> {guidance.suggested_correlation_distance_m:.3e} m "
+                f"(range {guidance.correlation_distance_bounds_m[0]:.3e} - "
+                f"{guidance.correlation_distance_bounds_m[1]:.3e})<br>"
+                f"<b>Wavelength:</b> {guidance.wavelength_m:.3e} m, "
+                f"<b>L/lambda:</b> {guidance.electrical_size_l_over_lambda:.2f}, "
+                f"<b>Median edge:</b> {guidance.median_edge_length_m:.3e} m"
+                f"<ul>{notes_html}</ul></div>"
+            )
+        except Exception as exc:
+            surface_guidance_widget.value = (
+                f"<span style='color:#b22222;'>Unable to estimate parameters: {exc}</span>"
+            )
+
     def _run_simulation(*_) -> None:
         run_button.disabled = True
         progress_bar.bar_style = "info"
@@ -1051,9 +1125,12 @@ def launch_rcs_widget(project_root: str | Path = "."):
             )
 
     run_button.on_click(_run_simulation)
+    suggest_surface_params_button.on_click(_suggest_surface_parameters)
     mode_widget.observe(_set_mode_controls, names="value")
     mode_widget.observe(_render_preview, names="value")
     use_material_file_widget.observe(_set_material_controls, names="value")
+    use_material_file_widget.observe(_update_material_summary, names="value")
+    material_file_widget.observe(_update_material_summary, names="value")
     model_widget.observe(_render_preview, names="value")
     phi_range_widget.observe(_render_preview, names="value")
     theta_range_widget.observe(_render_preview, names="value")
@@ -1072,13 +1149,18 @@ def launch_rcs_widget(project_root: str | Path = "."):
 
     _set_mode_controls()
     _set_material_controls()
+    _update_material_summary()
     _render_preview()
 
     controls = widgets.VBox(
         [
             widgets.HBox([mode_widget, model_widget, run_button]),
-            widgets.HBox([freq_widget, corr_widget, std_widget, pol_widget]),
+            widgets.HBox(
+                [freq_widget, corr_widget, std_widget, pol_widget, suggest_surface_params_button]
+            ),
+            surface_guidance_widget,
             widgets.HBox([use_material_file_widget, material_file_widget]),
+            material_summary_widget,
             widgets.HBox([phi_range_widget, phi_step_widget]),
             widgets.HBox([theta_range_widget, theta_step_widget]),
             incident_angles_row,

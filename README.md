@@ -152,4 +152,3 @@ The initial implementation by the CCE team was further extended by Dr. Santiago 
 4. Jenn, D. C. (2005). *Radar and Laser Cross Section Engineering* (2nd ed.). American Institute of Aeronautics and Astronautics.
 5. Swords, S. S. (1986). *Technical History of the Beginnings of Radar*. Peter Peregrinus Ltd. on behalf of the Institution of Electrical Engineers.
 6. Chatzigeorgiadis, F., & Jenn, D. C. (2004). A MATLAB physical-optics RCS prediction code. *IEEE Antennas and Propagation Magazine*, *46*(4), 137–139.
-

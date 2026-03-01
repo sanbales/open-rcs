@@ -1,19 +1,15 @@
 from __future__ import annotations
 
 import cmath
+import importlib
 import math
 from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
-
-try:
-    from numba import njit
-except ImportError:  # pragma: no cover - optional acceleration dependency
-    njit = None
 
 from .model_types import (
     AngleSweep,
@@ -23,6 +19,16 @@ from .model_types import (
     MonostaticSimulationConfig,
 )
 from .stl_module import convert_stl
+
+try:
+    from numba import njit
+except ImportError:  # pragma: no cover - optional acceleration dependency
+    njit = None
+yaml: Any
+try:
+    yaml = importlib.import_module("yaml")
+except ImportError:  # pragma: no cover - optional material library dependency
+    yaml = None
 
 SMALL_SIZE = 8
 MEDIUM_SIZE = 10
@@ -47,6 +53,7 @@ NUMBA_AVAILABLE = njit is not None
 MaterialLayer = list[float]
 MaterialEntry = list[str | MaterialLayer]
 MaterialTable = list[MaterialEntry]
+MaterialCatalog = dict[str, MaterialEntry]
 
 
 def get_polarization(incident_polarization: int) -> tuple[str, complex, complex]:
@@ -670,6 +677,298 @@ def taylor_g(n, w):
     return g
 
 
+def _canonical_material_type(material_type: str) -> str:
+    normalized_type = material_type.strip().lower()
+    aliases = {
+        "pec": MATERIAL_TYPE_PEC,
+        "composite": MATERIAL_TYPE_COMPOSITE,
+        "composite layer on pec": MATERIAL_TYPE_COMPOSITE_ON_PEC,
+        "multiple layers": MATERIAL_TYPE_MULTI_LAYER,
+        "multiple layers on pec": MATERIAL_TYPE_MULTI_LAYER_ON_PEC,
+        # Legacy aliases accepted for smoother migration.
+        "composito": MATERIAL_TYPE_COMPOSITE,
+        "camada de composito em pec": MATERIAL_TYPE_COMPOSITE_ON_PEC,
+        "multiplas camadas": MATERIAL_TYPE_MULTI_LAYER,
+        "multiplas camadas em pec": MATERIAL_TYPE_MULTI_LAYER_ON_PEC,
+    }
+    if normalized_type not in aliases:
+        raise ValueError(f"Unsupported material type: {material_type}")
+    return aliases[normalized_type]
+
+
+def _parse_material_layer(layer_data: Any, context: str) -> MaterialLayer:
+    if isinstance(layer_data, dict):
+        raw_values = [
+            layer_data.get("epsilon_r"),
+            layer_data.get("loss_tangent"),
+            layer_data.get("mu_r_real"),
+            layer_data.get("mu_r_imag"),
+            layer_data.get("thickness_mm"),
+        ]
+    elif isinstance(layer_data, (list, tuple)) and len(layer_data) == 5:
+        raw_values = list(layer_data)
+    else:
+        raise ValueError(
+            f"{context}: each layer must be either a mapping with "
+            "'epsilon_r/loss_tangent/mu_r_real/mu_r_imag/thickness_mm' or a 5-value list."
+        )
+
+    parsed_values: MaterialLayer = []
+    for value in raw_values:
+        if value is None:
+            raise ValueError(f"{context}: all layer fields must be present.")
+        try:
+            parsed_values.append(float(cast(Any, value)))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{context}: all layer values must be numeric.") from exc
+    return parsed_values
+
+
+def _clone_material_entry(material_entry: MaterialEntry) -> MaterialEntry:
+    cloned_entry: MaterialEntry = [str(material_entry[TYPE]), str(material_entry[DESCRIPTION])]
+    for layer in material_entry[LAYERS:]:
+        cloned_entry.append(list(cast(MaterialLayer, layer)))
+    return cloned_entry
+
+
+def _material_entry_from_yaml(
+    material_definition: dict[str, Any], index: int
+) -> tuple[str, MaterialEntry]:
+    material_id = str(material_definition.get("id", "")).strip()
+    if not material_id:
+        raise ValueError(f"materials[{index}] is missing a non-empty 'id'.")
+    material_type = _canonical_material_type(str(material_definition.get("type", "")))
+    description = str(material_definition.get("description", material_id))
+    layers_raw = material_definition.get("layers", [])
+    if layers_raw is None:
+        layers_raw = []
+    if not isinstance(layers_raw, list):
+        raise ValueError(f"materials[{index}]: 'layers' must be a list.")
+
+    material_entry: MaterialEntry = [material_type, description]
+    if material_type != MATERIAL_TYPE_PEC and not layers_raw:
+        raise ValueError(f"materials[{index}] ({material_id}) requires at least one layer.")
+    for layer_index, layer_data in enumerate(layers_raw):
+        context = f"materials[{index}].layers[{layer_index}]"
+        material_entry.append(_parse_material_layer(layer_data, context))
+    return material_id, material_entry
+
+
+def _parse_facet_selector(selector: Any, ntria: int, context: str) -> set[int]:
+    selected_facets: set[int] = set()
+    if isinstance(selector, str):
+        if selector.strip().lower() != "all":
+            raise ValueError(f"{context}: unsupported selector string '{selector}'.")
+        return set(range(ntria))
+    if not isinstance(selector, list):
+        raise ValueError(f"{context}: selector must be 'all' or a list.")
+
+    for item in selector:
+        if isinstance(item, (list, tuple)) and len(item) == 2:
+            start = int(item[0])
+            stop = int(item[1])
+            if stop < start:
+                start, stop = stop, start
+            if start < 1 or stop > ntria:
+                raise ValueError(
+                    f"{context}: range [{start}, {stop}] is outside valid facet IDs 1..{ntria}."
+                )
+            selected_facets.update(range(start - 1, stop))
+        else:
+            facet_id = int(item)
+            if facet_id < 1 or facet_id > ntria:
+                raise ValueError(
+                    f"{context}: facet ID {facet_id} is outside valid range 1..{ntria}."
+                )
+            selected_facets.add(facet_id - 1)
+    return selected_facets
+
+
+def _parse_tags(tag_definitions: Any, ntria: int) -> dict[str, set[int]]:
+    if tag_definitions is None:
+        return {}
+    if not isinstance(tag_definitions, dict):
+        raise ValueError("'tags' must be a mapping from tag name to facet selectors.")
+    parsed_tags: dict[str, set[int]] = {}
+    for tag_name, selector in tag_definitions.items():
+        if not isinstance(tag_name, str) or not tag_name.strip():
+            raise ValueError("Tag names must be non-empty strings.")
+        parsed_tags[tag_name] = _parse_facet_selector(
+            selector,
+            ntria,
+            context=f"tags.{tag_name}",
+        )
+    return parsed_tags
+
+
+def _resolve_assignment_selector(
+    assignment: dict[str, Any],
+    ntria: int,
+    parsed_tags: dict[str, set[int]],
+    assignment_index: int,
+) -> set[int]:
+    selection: set[int] = set()
+    explicit_selector_used = False
+
+    if "facets" in assignment:
+        explicit_selector_used = True
+        selection.update(
+            _parse_facet_selector(
+                assignment["facets"],
+                ntria,
+                context=f"assignments[{assignment_index}].facets",
+            )
+        )
+    if "facet_indices" in assignment:
+        explicit_selector_used = True
+        selection.update(
+            _parse_facet_selector(
+                assignment["facet_indices"],
+                ntria,
+                context=f"assignments[{assignment_index}].facet_indices",
+            )
+        )
+    if "facet_ranges" in assignment:
+        explicit_selector_used = True
+        selection.update(
+            _parse_facet_selector(
+                assignment["facet_ranges"],
+                ntria,
+                context=f"assignments[{assignment_index}].facet_ranges",
+            )
+        )
+
+    for key in ("tags", "groups"):
+        if key in assignment:
+            explicit_selector_used = True
+            raw_names = assignment[key]
+            if not isinstance(raw_names, list):
+                raise ValueError(
+                    f"assignments[{assignment_index}].{key} must be a list of tag names."
+                )
+            for raw_name in raw_names:
+                tag_name = str(raw_name)
+                if tag_name not in parsed_tags:
+                    raise ValueError(
+                        f"assignments[{assignment_index}].{key} references "
+                        f"unknown tag '{tag_name}'."
+                    )
+                selection.update(parsed_tags[tag_name])
+
+    if not explicit_selector_used:
+        return set(range(ntria))
+    if not selection:
+        raise ValueError(f"assignments[{assignment_index}] does not select any facets.")
+    return selection
+
+
+def _material_table_from_yaml_document(document: dict[str, Any], ntria: int) -> MaterialTable:
+    materials_raw = document.get("materials")
+    if not isinstance(materials_raw, list) or not materials_raw:
+        raise ValueError("YAML material file must define a non-empty 'materials' list.")
+
+    material_catalog: MaterialCatalog = {}
+    for material_index, raw_material in enumerate(materials_raw):
+        if not isinstance(raw_material, dict):
+            raise ValueError(f"materials[{material_index}] must be a mapping.")
+        material_id, material_entry = _material_entry_from_yaml(raw_material, material_index)
+        if material_id in material_catalog:
+            raise ValueError(f"Duplicate material id '{material_id}' in YAML file.")
+        material_catalog[material_id] = material_entry
+
+    default_material = document.get("default_material")
+    if default_material is None and isinstance(document.get("defaults"), dict):
+        default_material = cast(dict[str, Any], document["defaults"]).get("material")
+    default_material_id = str(default_material).strip() if default_material is not None else ""
+    if default_material_id and default_material_id not in material_catalog:
+        raise ValueError(f"default_material '{default_material_id}' is not defined in materials.")
+
+    parsed_tags = _parse_tags(document.get("tags"), ntria)
+    assignments_raw = document.get("assignments", [])
+    if assignments_raw is None:
+        assignments_raw = []
+    if not isinstance(assignments_raw, list):
+        raise ValueError("'assignments' must be a list when provided.")
+
+    facet_material_ids: list[str | None] = [None] * ntria
+    if default_material_id:
+        for facet_index in range(ntria):
+            facet_material_ids[facet_index] = default_material_id
+
+    for assignment_index, raw_assignment in enumerate(assignments_raw):
+        if not isinstance(raw_assignment, dict):
+            raise ValueError(f"assignments[{assignment_index}] must be a mapping.")
+        material_id = str(raw_assignment.get("material", "")).strip()
+        if not material_id:
+            raise ValueError(f"assignments[{assignment_index}] is missing 'material'.")
+        if material_id not in material_catalog:
+            raise ValueError(
+                f"assignments[{assignment_index}] references unknown material id '{material_id}'."
+            )
+        selected_facets = _resolve_assignment_selector(
+            raw_assignment,
+            ntria,
+            parsed_tags,
+            assignment_index,
+        )
+        for facet_index in selected_facets:
+            facet_material_ids[facet_index] = material_id
+
+    missing_facets = [
+        index + 1
+        for index, assigned_material_id in enumerate(facet_material_ids)
+        if assigned_material_id is None
+    ]
+    if missing_facets:
+        preview = ", ".join(str(value) for value in missing_facets[:10])
+        suffix = "..." if len(missing_facets) > 10 else ""
+        raise ValueError(
+            f"YAML material assignments are incomplete. Missing facet IDs: {preview}{suffix}"
+        )
+
+    material_table: MaterialTable = []
+    for assigned_material_id in facet_material_ids:
+        assert assigned_material_id is not None
+        material_table.append(_clone_material_entry(material_catalog[assigned_material_id]))
+    return material_table
+
+
+def load_material_catalog(material_path: str | Path) -> MaterialCatalog:
+    """Load and validate the material catalog section from a YAML .rcsmat file."""
+    if yaml is None:  # pragma: no cover - runtime dependency guard
+        raise ImportError("YAML material files require PyYAML. Install with: pip install pyyaml")
+
+    with Path(material_path).open("r", encoding="utf-8") as stream:
+        document = yaml.safe_load(stream)
+    if not isinstance(document, dict):
+        raise ValueError("YAML material file root must be a mapping.")
+
+    materials_raw = document.get("materials")
+    if not isinstance(materials_raw, list) or not materials_raw:
+        raise ValueError("YAML material file must define a non-empty 'materials' list.")
+
+    material_catalog: MaterialCatalog = {}
+    for material_index, raw_material in enumerate(materials_raw):
+        if not isinstance(raw_material, dict):
+            raise ValueError(f"materials[{material_index}] must be a mapping.")
+        material_id, material_entry = _material_entry_from_yaml(raw_material, material_index)
+        if material_id in material_catalog:
+            raise ValueError(f"Duplicate material id '{material_id}' in YAML file.")
+        material_catalog[material_id] = _clone_material_entry(material_entry)
+    return material_catalog
+
+
+def _load_material_table_from_yaml(material_path: str | Path, ntria: int) -> MaterialTable:
+    if yaml is None:  # pragma: no cover - runtime dependency guard
+        raise ImportError("YAML material files require PyYAML. Install with: pip install pyyaml")
+
+    with Path(material_path).open("r", encoding="utf-8") as stream:
+        document = yaml.safe_load(stream)
+    if not isinstance(document, dict):
+        raise ValueError("YAML material file root must be a mapping.")
+    return _material_table_from_yaml_document(document, ntria)
+
+
 def save_list_in_file(material_rows: list, output_file: str) -> None:
     serialized_rows = []
     for row in material_rows:
@@ -687,11 +986,17 @@ def save_list_in_file(material_rows: list, output_file: str) -> None:
 
 
 def get_entries_from_material_file(ntria: int, matrlpath: str) -> MaterialTable:
+    material_path = Path(matrlpath)
     try:
-        with open(matrlpath) as file:
-            matrl = get_material_properties_from_file(file)
+        if material_path.suffix.lower() in {".rcsmat", ".yaml", ".yml"}:
+            matrl = _load_material_table_from_yaml(material_path, ntria)
+        else:
+            with material_path.open("r", encoding="utf-8") as file:
+                matrl = get_material_properties_from_file(file)
+    except FileNotFoundError as exc:
+        raise FileNotFoundError(f"Material file not found: {material_path}") from exc
     except Exception as exc:
-        raise FileNotFoundError("Material file not found.") from exc
+        raise ValueError(f"Invalid material file: {material_path}") from exc
 
     if len(matrl) != ntria:
         raise ValueError("Number of material entries does not match the number of facets.")
@@ -708,7 +1013,12 @@ def convert_material_textlist_to_list(text_rows: Iterable[str]) -> MaterialTable
     material_table: MaterialTable = []
     for row in text_rows:
         entries = row.strip("\n").split(",")
-        formatted_entries: MaterialEntry = [entries[TYPE], entries[DESCRIPTION]]
+        if len(entries) < 2:
+            continue
+        formatted_entries: MaterialEntry = [
+            _canonical_material_type(entries[TYPE]),
+            entries[DESCRIPTION],
+        ]
         layer_values: MaterialLayer = []
 
         for index, entry in enumerate(entries[LAYERS:]):

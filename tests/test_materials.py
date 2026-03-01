@@ -150,3 +150,15 @@ def test_coordinate_transforms_and_phase_helpers_are_consistent() -> None:
         incident_direction_w=incident_w,
     )
     assert np.allclose(precomputed_bistatic_phase, direct_bistatic_phase, atol=1e-12)
+
+
+def test_get_reflection_coeff_from_material_rejects_unknown_type() -> None:
+    with pytest.raises(ValueError):
+        rf.get_reflection_coeff_from_material(
+            thri=0.1,
+            phrii=0.2,
+            alpha=0.0,
+            beta=0.0,
+            freq=10.0e9,
+            matrlLine=["UnknownType", "bad-material"],
+        )

@@ -21,9 +21,10 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "numpy>=2.1.0",
-    "numpy-stl>=3.1.2",
     "matplotlib>=3.9.0",
+    "numpy-stl>=3.1.2",
+    "numpy>=2.1.0",
+    "pyyaml>=6.0",
 ]
 keywords = [
     "radar",
@@ -120,6 +121,7 @@ python = "3.11.*"
 numpy = "*"
 numpy-stl = "*"
 matplotlib = "*"
+pyyaml = "*"
 numba = "*"
 jupyterlab = "*"
 ipywidgets = "*"
