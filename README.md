@@ -20,7 +20,7 @@ The project now uses a Jupyter notebook workflow for interactive use. The previo
 2. Clone the repository:
 
 ```bash
-git clone https://github.com/comp-ime-eb-br/open-rcs
+git clone https://github.com/sanbales/open-rcs
 cd open-rcs
 ```
 

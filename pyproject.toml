@@ -34,10 +34,10 @@ keywords = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/comp-ime-eb-br/open-rcs"
-Documentation = "https://github.com/comp-ime-eb-br/open-rcs"
-Source = "https://github.com/comp-ime-eb-br/open-rcs"
-Issues = "https://github.com/comp-ime-eb-br/open-rcs/issues"
+Homepage = "https://github.com/sanbales/open-rcs"
+Documentation = "https://github.com/sanbales/open-rcs"
+Source = "https://github.com/sanbales/open-rcs"
+Issues = "https://github.com/sanbales/open-rcs/issues"
 
 [project.optional-dependencies]
 dev = [
