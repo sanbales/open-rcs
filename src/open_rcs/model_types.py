@@ -73,6 +73,7 @@ class MonostaticSimulationConfig:
     incident_polarization: int
     angle_sweep: AngleSweep
     material: MaterialConfig
+    use_numba: bool = True
 
 
 @dataclass(slots=True)
@@ -88,6 +89,7 @@ class BistaticSimulationConfig:
     incident_theta_deg: float
     incident_phi_deg: float
     material: MaterialConfig
+    use_numba: bool = True
 
 
 @dataclass(slots=True)

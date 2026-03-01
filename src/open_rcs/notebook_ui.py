@@ -448,15 +448,29 @@ def launch_rcs_widget(project_root: str | Path = "."):
         tooltip="Elevation step size (degrees).",
         layout=widgets.Layout(width="260px"),
     )
-    inc_theta_widget = widgets.FloatText(
+    inc_theta_widget = widgets.FloatSlider(
         value=30.0,
+        min=0.0,
+        max=180.0,
+        step=1.0,
         description="Inc theta:",
+        readout_format=".0f",
         tooltip="Incident elevation angle for bistatic mode (degrees).",
+        layout=widgets.Layout(width="320px"),
     )
-    inc_phi_widget = widgets.FloatText(
+    inc_phi_widget = widgets.FloatSlider(
         value=0.0,
+        min=0.0,
+        max=360.0,
+        step=1.0,
         description="Inc phi:",
+        readout_format=".0f",
         tooltip="Incident azimuth angle for bistatic mode (degrees).",
+        layout=widgets.Layout(width="320px"),
+    )
+    incident_angles_row = widgets.HBox(
+        [inc_theta_widget, inc_phi_widget],
+        layout=widgets.Layout(display="none"),
     )
 
     roll_widget = widgets.FloatSlider(
@@ -562,6 +576,70 @@ def launch_rcs_widget(project_root: str | Path = "."):
             theta_stop_deg,
             int(phi_step_widget.value),
             int(theta_step_widget.value),
+        )
+
+    def _incident_direction_unit() -> np.ndarray:
+        incident_theta_rad = np.deg2rad(float(inc_theta_widget.value))
+        incident_phi_rad = np.deg2rad(float(inc_phi_widget.value))
+        incident_direction = np.array(
+            [
+                np.sin(incident_theta_rad) * np.cos(incident_phi_rad),
+                np.sin(incident_theta_rad) * np.sin(incident_phi_rad),
+                np.cos(incident_theta_rad),
+            ],
+            dtype=float,
+        )
+        norm = float(np.linalg.norm(incident_direction))
+        if norm <= 1e-12:
+            return np.array([0.0, 0.0, 1.0], dtype=float)
+        return incident_direction / norm
+
+    def _add_incident_wave_arrow(
+        fig: Any, mesh_center: np.ndarray, reference_radius: float
+    ) -> None:
+        if mode_widget.value != "bistatic":
+            return
+        incident_direction = _incident_direction_unit()
+        line_tail = mesh_center + incident_direction * (reference_radius * 1.95)
+        cone_tail = mesh_center + incident_direction * (reference_radius * 1.35)
+        cone_length = max(reference_radius * 0.24, 0.08)
+        cone_vector = -incident_direction * cone_length
+        fig.add_trace(
+            go.Scatter3d(
+                x=[line_tail[0], cone_tail[0]],
+                y=[line_tail[1], cone_tail[1]],
+                z=[line_tail[2], cone_tail[2]],
+                mode="lines",
+                line=dict(color="#e63946", width=8),
+                name="Incident Wave",
+                hovertemplate=(
+                    "Incident wave direction<br>"
+                    f"theta={float(inc_theta_widget.value):.0f} deg, "
+                    f"phi={float(inc_phi_widget.value):.0f} deg<extra></extra>"
+                ),
+            )
+        )
+        fig.add_trace(
+            go.Cone(
+                x=[cone_tail[0]],
+                y=[cone_tail[1]],
+                z=[cone_tail[2]],
+                u=[cone_vector[0]],
+                v=[cone_vector[1]],
+                w=[cone_vector[2]],
+                anchor="tail",
+                sizemode="absolute",
+                sizeref=max(cone_length * 1.05, 0.05),
+                colorscale=[[0.0, "#e63946"], [1.0, "#e63946"]],
+                showscale=False,
+                showlegend=False,
+                name="Incident Wave Tip",
+                hovertemplate=(
+                    "Wave incoming toward model<br>"
+                    f"theta={float(inc_theta_widget.value):.0f} deg, "
+                    f"phi={float(inc_phi_widget.value):.0f} deg<extra></extra>"
+                ),
+            )
         )
 
     def _update_sweep_info(*_) -> None:
@@ -678,11 +756,19 @@ def launch_rcs_widget(project_root: str | Path = "."):
                     hovertemplate="Sweep surface<extra></extra>",
                 )
             )
+            is_bistatic = mode_widget.value == "bistatic"
+            _add_incident_wave_arrow(fig_preview, mesh_center, envelope_radius)
             fig_preview.update_layout(
                 title=(
                     "3D Model Preview (drag to rotate) "
                     f"| phi {phi_start_deg:.0f}-{phi_stop_deg:.0f} deg, "
                     f"theta {theta_start_deg:.0f}-{theta_stop_deg:.0f} deg"
+                    + (
+                        f" | Inc: theta={float(inc_theta_widget.value):.0f} deg, "
+                        f"phi={float(inc_phi_widget.value):.0f} deg"
+                        if is_bistatic
+                        else ""
+                    )
                 ),
                 scene=dict(aspectmode="data"),
                 height=520,
@@ -695,6 +781,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
         is_bistatic = mode_widget.value == "bistatic"
         inc_theta_widget.disabled = not is_bistatic
         inc_phi_widget.disabled = not is_bistatic
+        incident_angles_row.layout.display = "flex" if is_bistatic else "none"
 
     def _set_material_controls(*_) -> None:
         material_file_widget.disabled = (not bool(use_material_file_widget.value)) or (
@@ -912,8 +999,21 @@ def launch_rcs_widget(project_root: str | Path = "."):
                         name="RCS Curve",
                     )
                 )
+            mesh_center = mesh_vertices_np.mean(axis=0)
+            mesh_radius = float(np.linalg.norm(mesh_vertices_np - mesh_center, axis=1).max())
+            if mesh_radius <= 0:
+                mesh_radius = 1.0
+            _add_incident_wave_arrow(fig_3d, mesh_center, mesh_radius * 1.2)
             fig_3d.update_layout(
-                title="Interactive STL + RCS Overlay",
+                title=(
+                    "Interactive STL + RCS Overlay"
+                    + (
+                        f" | Inc: theta={float(inc_theta_widget.value):.0f} deg, "
+                        f"phi={float(inc_phi_widget.value):.0f} deg"
+                        if mode_widget.value == "bistatic"
+                        else ""
+                    )
+                ),
                 scene=dict(aspectmode="data"),
                 legend=dict(orientation="h"),
                 height=620,
@@ -950,6 +1050,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
 
     run_button.on_click(_run_simulation)
     mode_widget.observe(_set_mode_controls, names="value")
+    mode_widget.observe(_render_preview, names="value")
     use_material_file_widget.observe(_set_material_controls, names="value")
     model_widget.observe(_render_preview, names="value")
     phi_range_widget.observe(_render_preview, names="value")
@@ -959,6 +1060,8 @@ def launch_rcs_widget(project_root: str | Path = "."):
     roll_widget.observe(_render_preview, names="value")
     pitch_widget.observe(_render_preview, names="value")
     yaw_widget.observe(_render_preview, names="value")
+    inc_theta_widget.observe(_render_preview, names="value")
+    inc_phi_widget.observe(_render_preview, names="value")
 
     chart_mode_widget.observe(_render_results, names="value")
     component_widget.observe(_render_results, names="value")
@@ -976,7 +1079,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
             widgets.HBox([use_material_file_widget, material_file_widget]),
             widgets.HBox([phi_range_widget, phi_step_widget]),
             widgets.HBox([theta_range_widget, theta_step_widget]),
-            widgets.HBox([inc_theta_widget, inc_phi_widget]),
+            incident_angles_row,
             widgets.HBox([roll_widget, pitch_widget, yaw_widget]),
             widgets.HBox([chart_mode_widget, component_widget, scale_widget, opacity_widget]),
             sweep_info_widget,

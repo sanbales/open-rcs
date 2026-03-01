@@ -136,7 +136,9 @@ def simulate_monostatic(
     phase_o_x = phase_origin_vectors[:, 0]
     phase_o_y = phase_origin_vectors[:, 1]
     phase_o_z = phase_origin_vectors[:, 2]
-    use_numba_kernel = rf.NUMBA_AVAILABLE and not use_material_lookup
+    use_numba_kernel = (
+        simulation_config.use_numba and rf.NUMBA_AVAILABLE and not use_material_lookup
+    )
 
     for phi_index, phi_deg in enumerate(phi_values_deg):
         phi_radians = phi_deg * radian_factor
@@ -337,16 +339,14 @@ def simulate_monostatic(
                     diffuse_scale = (
                         roughness_factor_secondary * triangle_area * (local_cosine_theta**2)
                     )
-                    diffuse_exponent = (
-                        -(
-                            (
-                                normalized_correlation_distance
-                                * math.pi
-                                * local_sine_theta
-                                / wavelength_m
-                            )
-                            ** 2
+                    diffuse_exponent = -(
+                        (
+                            normalized_correlation_distance
+                            * math.pi
+                            * local_sine_theta
+                            / wavelength_m
                         )
+                        ** 2
                     )
                     diffuse_component = diffuse_scale * math.exp(diffuse_exponent)
 

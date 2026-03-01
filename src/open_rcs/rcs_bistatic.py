@@ -26,7 +26,8 @@ def simulate_bistatic(
 ) -> RcsComputationResult:
     """Run bistatic simulation and return in-memory arrays (no disk output)."""
     material_entries: list = []
-    if simulation_config.material.resistivity_mode == rf.MATERIALESPECIFICO:
+    use_material_lookup = simulation_config.material.resistivity_mode == rf.MATERIALESPECIFICO
+    if use_material_lookup:
         material_entries = rf.get_entries_from_material_file(
             int(geometry_data.n_triangles),
             simulation_config.material.material_path,
@@ -70,7 +71,7 @@ def simulate_bistatic(
         incident_theta_projection_u,
         incident_theta_projection_v,
         incident_theta_projection_w,
-        incident_direction_unit_vector,
+        _incident_direction_unit_vector,
     ) = rf.bi_calculate_values(
         simulation_config.angle_sweep.phi_start_deg,
         simulation_config.angle_sweep.phi_stop_deg,
@@ -139,6 +140,31 @@ def simulate_bistatic(
     total_samples = phi_count * theta_count
     completed_samples = 0
     callback_stride = max(1, int(progress_update_stride))
+    triangle_count = int(geometry_data.n_triangles)
+    illumination_flags = geometry_data.illumination_flags
+    resistivity_values = geometry_data.resistivity_values
+    cosine_alpha_all = transform_z_all[:, 0, 0]
+    sine_alpha_all = transform_z_all[:, 0, 1]
+    cosine_beta_all = transform_y_all[:, 0, 0]
+    sine_beta_all = transform_y_all[:, 2, 0]
+    surface_normal_x = surface_normals[:, 0]
+    surface_normal_y = surface_normals[:, 1]
+    surface_normal_z = surface_normals[:, 2]
+    phase_p_x = phase_p_vectors[:, 0]
+    phase_p_y = phase_p_vectors[:, 1]
+    phase_p_z = phase_p_vectors[:, 2]
+    phase_q_x = phase_q_vectors[:, 0]
+    phase_q_y = phase_q_vectors[:, 1]
+    phase_q_z = phase_q_vectors[:, 2]
+    phase_o_x = phase_origin_vectors[:, 0]
+    phase_o_y = phase_origin_vectors[:, 1]
+    phase_o_z = phase_origin_vectors[:, 2]
+    incident_field_x = incident_field_cartesian[0]
+    incident_field_y = incident_field_cartesian[1]
+    incident_field_z = incident_field_cartesian[2]
+    use_numba_kernel = (
+        simulation_config.use_numba and rf.NUMBA_AVAILABLE and not use_material_lookup
+    )
 
     for phi_index, phi_deg in enumerate(phi_values_deg):
         phi_radians = phi_deg * radian_factor
@@ -171,169 +197,209 @@ def simulate_bistatic(
             )
 
             accumulated_fields = FieldAccumulator()
-            for triangle_index in range(int(geometry_data.n_triangles)):
-                incident_normal_dot = float(
-                    np.dot(
-                        surface_normals[triangle_index, :],
-                        np.transpose(incident_direction_unit_vector),
-                    )
+            if use_numba_kernel:
+                (
+                    accumulated_fields.theta_component,
+                    accumulated_fields.phi_component,
+                    accumulated_fields.diffuse_theta,
+                    accumulated_fields.diffuse_phi,
+                ) = rf.accumulate_bistatic_sample_numba(
+                    illumination_flag_mode=geometry_data.illumination_flag_mode,
+                    illumination_flags=illumination_flags,
+                    resistivity_values=resistivity_values,
+                    triangle_areas=triangle_areas,
+                    surface_alpha_cos=cosine_alpha_all,
+                    surface_alpha_sin=sine_alpha_all,
+                    surface_beta_cos=cosine_beta_all,
+                    surface_beta_sin=sine_beta_all,
+                    surface_normal_x=surface_normal_x,
+                    surface_normal_y=surface_normal_y,
+                    surface_normal_z=surface_normal_z,
+                    phase_p_x=phase_p_x,
+                    phase_p_y=phase_p_y,
+                    phase_p_z=phase_p_z,
+                    phase_q_x=phase_q_x,
+                    phase_q_y=phase_q_y,
+                    phase_q_z=phase_q_z,
+                    phase_o_x=phase_o_x,
+                    phase_o_y=phase_o_y,
+                    phase_o_z=phase_o_z,
+                    incident_direction_u=incident_direction_u,
+                    incident_direction_v=incident_direction_v,
+                    incident_direction_w=incident_direction_w,
+                    observation_direction_u=observation_direction_u,
+                    observation_direction_v=observation_direction_v,
+                    observation_direction_w=observation_direction_w,
+                    theta_projection_u=theta_projection_u,
+                    theta_projection_v=theta_projection_v,
+                    theta_projection_w=theta_projection_w,
+                    sine_phi=sine_phi,
+                    cosine_phi=cosine_phi,
+                    incident_field_x=incident_field_x,
+                    incident_field_y=incident_field_y,
+                    incident_field_z=incident_field_z,
+                    wave_number=wave_number,
+                    roughness_factor_secondary=roughness_factor_secondary,
+                    normalized_correlation_distance=normalized_correlation_distance,
+                    wavelength_m=wavelength_m,
+                    incident_amplitude=incident_amplitude,
+                    taylor_terms=taylor_terms,
+                    taylor_threshold=taylor_threshold,
                 )
-                if geometry_data.illumination_flag_mode == 0 and not (
+            else:
+                for triangle_index in range(triangle_count):
+                    incident_normal_dot = (
+                        surface_normal_x[triangle_index] * incident_direction_u
+                        + surface_normal_y[triangle_index] * incident_direction_v
+                        + surface_normal_z[triangle_index] * incident_direction_w
+                    )
+                    if geometry_data.illumination_flag_mode == 0 and not (
+                        (illumination_flags[triangle_index] == 1 and incident_normal_dot >= 0)
+                        or illumination_flags[triangle_index] == 0
+                    ):
+                        continue
+
                     (
-                        geometry_data.illumination_flags[triangle_index] == 1
-                        and incident_normal_dot >= 0
+                        incident_local_u,
+                        incident_local_v,
+                        incident_local_w,
+                        transform_z,
+                        transform_y,
+                    ) = rf.direction_cosines_from_precomputed(
+                        transform_z_all,
+                        transform_y_all,
+                        incident_direction_vector,
+                        triangle_index,
                     )
-                    or geometry_data.illumination_flags[triangle_index] == 0
-                ):
-                    continue
+                    (
+                        _incident_local_theta,
+                        _incident_local_phi,
+                        cosine_local_incident_phi,
+                        sine_local_incident_phi,
+                        sine_local_incident_theta,
+                        cosine_local_incident_theta,
+                    ) = rf.bi_spherical_angles(incident_local_u, incident_local_v, incident_local_w)
 
-                (
-                    incident_local_u,
-                    incident_local_v,
-                    incident_local_w,
-                    transform_z,
-                    transform_y,
-                ) = rf.direction_cosines_from_precomputed(
-                    transform_z_all,
-                    transform_y_all,
-                    incident_direction_vector,
-                    triangle_index,
-                )
-                (
-                    _incident_local_theta,
-                    _incident_local_phi,
-                    cosine_local_incident_phi,
-                    sine_local_incident_phi,
-                    sine_local_incident_theta,
-                    cosine_local_incident_theta,
-                ) = rf.bi_spherical_angles(incident_local_u, incident_local_v, incident_local_w)
+                    (
+                        observation_local_u,
+                        observation_local_v,
+                        observation_local_w,
+                        transform_z,
+                        transform_y,
+                    ) = rf.direction_cosines_from_precomputed(
+                        transform_z_all,
+                        transform_y_all,
+                        observation_direction_vector,
+                        triangle_index,
+                    )
+                    (
+                        observation_local_theta,
+                        _observation_local_phi,
+                        _obs_cp,
+                        _obs_sp,
+                        observation_local_sine_theta,
+                        observation_local_cosine_theta,
+                    ) = rf.bi_spherical_angles(
+                        observation_local_u,
+                        observation_local_v,
+                        observation_local_w,
+                    )
 
-                (
-                    observation_local_u,
-                    observation_local_v,
-                    observation_local_w,
-                    transform_z,
-                    transform_y,
-                ) = rf.direction_cosines_from_precomputed(
-                    transform_z_all,
-                    transform_y_all,
-                    observation_direction_vector,
-                    triangle_index,
-                )
-                (
-                    observation_local_theta,
-                    _observation_local_phi,
-                    _obs_cp,
-                    _obs_sp,
-                    observation_local_sine_theta,
-                    observation_local_cosine_theta,
-                ) = rf.bi_spherical_angles(
-                    observation_local_u,
-                    observation_local_v,
-                    observation_local_w,
-                )
+                    phase_p, phase_q, phase_origin = rf.bi_phase_vertex_triangle_precomputed(
+                        wave_number,
+                        phase_p_vectors,
+                        phase_q_vectors,
+                        phase_origin_vectors,
+                        triangle_index,
+                        observation_direction_u,
+                        observation_direction_v,
+                        observation_direction_w,
+                        incident_direction_u,
+                        incident_direction_v,
+                        incident_direction_w,
+                    )
+                    cosine_alpha = float(transform_z[0, 0])
+                    sine_alpha = float(transform_z[0, 1])
+                    cosine_beta = float(transform_y[0, 0])
+                    sine_beta = float(transform_y[2, 0])
+                    rotated_x = cosine_alpha * incident_field_x + sine_alpha * incident_field_y
+                    rotated_y = -sine_alpha * incident_field_x + cosine_alpha * incident_field_y
+                    local_field_x = cosine_beta * rotated_x - sine_beta * incident_field_z
+                    local_field_y = rotated_y
+                    local_field_z = sine_beta * rotated_x + cosine_beta * incident_field_z
+                    local_theta_field = (
+                        local_field_x * cosine_local_incident_theta * cosine_local_incident_phi
+                        + local_field_y * cosine_local_incident_theta * sine_local_incident_phi
+                        - local_field_z * sine_local_incident_theta
+                    )
+                    local_phi_field = (
+                        -local_field_x * sine_local_incident_phi
+                        + local_field_y * cosine_local_incident_phi
+                    )
 
-                phase_p, phase_q, phase_origin = rf.bi_phase_vertex_triangle_precomputed(
-                    wave_number,
-                    phase_p_vectors,
-                    phase_q_vectors,
-                    phase_origin_vectors,
-                    triangle_index,
-                    observation_direction_u,
-                    observation_direction_v,
-                    observation_direction_w,
-                    incident_direction_u,
-                    incident_direction_v,
-                    incident_direction_w,
-                )
-                cosine_alpha = float(transform_z[0, 0])
-                sine_alpha = float(transform_z[0, 1])
-                cosine_beta = float(transform_y[0, 0])
-                sine_beta = float(transform_y[2, 0])
-                rotated_x = (
-                    cosine_alpha * incident_field_cartesian[0]
-                    + sine_alpha * incident_field_cartesian[1]
-                )
-                rotated_y = (
-                    -sine_alpha * incident_field_cartesian[0]
-                    + cosine_alpha * incident_field_cartesian[1]
-                )
-                local_field_x = cosine_beta * rotated_x - sine_beta * incident_field_cartesian[2]
-                local_field_y = rotated_y
-                local_field_z = sine_beta * rotated_x + cosine_beta * incident_field_cartesian[2]
-                local_theta_field = (
-                    local_field_x * cosine_local_incident_theta * cosine_local_incident_phi
-                    + local_field_y * cosine_local_incident_theta * sine_local_incident_phi
-                    - local_field_z * sine_local_incident_theta
-                )
-                local_phi_field = (
-                    -local_field_x * sine_local_incident_phi
-                    + local_field_y * cosine_local_incident_phi
-                )
+                    reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
+                        int(resistivity_values[triangle_index]),
+                        triangle_index,
+                        observation_local_theta,
+                        theta_radians,
+                        phi_radians,
+                        surface_alpha_angles[triangle_index],
+                        surface_beta_angles[triangle_index],
+                        simulation_config.frequency_hz,
+                        material_entries,
+                        local_cos_theta=observation_local_cosine_theta,
+                    )
+                    local_surface_current_x = (
+                        -local_theta_field * cosine_local_incident_phi * reflection_parallel
+                        + local_phi_field
+                        * sine_local_incident_phi
+                        * reflection_perpendicular
+                        * cosine_local_incident_theta
+                    )
+                    local_surface_current_y = (
+                        -local_theta_field * sine_local_incident_phi * reflection_parallel
+                        - local_phi_field
+                        * cosine_local_incident_phi
+                        * reflection_perpendicular
+                        * cosine_local_incident_theta
+                    )
 
-                reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
-                    geometry_data.resistivity_values[triangle_index],
-                    triangle_index,
-                    observation_local_theta,
-                    theta_radians,
-                    phi_radians,
-                    surface_alpha_angles[triangle_index],
-                    surface_beta_angles[triangle_index],
-                    simulation_config.frequency_hz,
-                    material_entries,
-                    local_cos_theta=observation_local_cosine_theta,
-                )
-                local_surface_current_x = (
-                    -local_theta_field * cosine_local_incident_phi * reflection_parallel
-                    + local_phi_field
-                    * sine_local_incident_phi
-                    * reflection_perpendicular
-                    * cosine_local_incident_theta
-                )
-                local_surface_current_y = (
-                    -local_theta_field * sine_local_incident_phi * reflection_parallel
-                    - local_phi_field
-                    * cosine_local_incident_phi
-                    * reflection_perpendicular
-                    * cosine_local_incident_theta
-                )
-
-                area_integral_value = rf.calculate_ic(
-                    phase_p,
-                    phase_q,
-                    phase_origin,
-                    taylor_terms,
-                    float(triangle_areas[triangle_index]),
-                    incident_amplitude,
-                    taylor_threshold,
-                )
-                (
-                    accumulated_fields.theta_component,
-                    accumulated_fields.phi_component,
-                    accumulated_fields.diffuse_phi,
-                    accumulated_fields.diffuse_theta,
-                ) = rf.calculate_fields(
-                    float(triangle_areas[triangle_index]),
-                    roughness_factor_secondary,
-                    normalized_correlation_distance,
-                    observation_local_sine_theta,
-                    observation_local_cosine_theta,
-                    wavelength_m,
-                    local_surface_current_y,
-                    area_integral_value,
-                    theta_projection_u,
-                    theta_projection_v,
-                    theta_projection_w,
-                    sine_phi,
-                    cosine_phi,
-                    accumulated_fields.theta_component,
-                    accumulated_fields.phi_component,
-                    accumulated_fields.diffuse_theta,
-                    accumulated_fields.diffuse_phi,
-                    local_surface_current_x,
-                    transform_z,
-                    transform_y,
-                )
+                    area_integral_value = rf.calculate_ic(
+                        phase_p,
+                        phase_q,
+                        phase_origin,
+                        taylor_terms,
+                        float(triangle_areas[triangle_index]),
+                        incident_amplitude,
+                        taylor_threshold,
+                    )
+                    (
+                        accumulated_fields.theta_component,
+                        accumulated_fields.phi_component,
+                        accumulated_fields.diffuse_phi,
+                        accumulated_fields.diffuse_theta,
+                    ) = rf.calculate_fields(
+                        float(triangle_areas[triangle_index]),
+                        roughness_factor_secondary,
+                        normalized_correlation_distance,
+                        observation_local_sine_theta,
+                        observation_local_cosine_theta,
+                        wavelength_m,
+                        local_surface_current_y,
+                        area_integral_value,
+                        theta_projection_u,
+                        theta_projection_v,
+                        theta_projection_w,
+                        sine_phi,
+                        cosine_phi,
+                        accumulated_fields.theta_component,
+                        accumulated_fields.phi_component,
+                        accumulated_fields.diffuse_theta,
+                        accumulated_fields.diffuse_phi,
+                        local_surface_current_x,
+                        transform_z,
+                        transform_y,
+                    )
 
             rf.calculate_sth_sph(
                 roughness_factor_primary,

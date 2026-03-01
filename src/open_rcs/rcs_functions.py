@@ -725,9 +725,9 @@ def taylor_g(n, w):
     exp_jw = np.exp(jw)
     g = (exp_jw - 1) / jw
     if n > 0:
-        for _ in range(1, n + 1):
+        for m in range(1, n + 1):
             go = g
-            g = (exp_jw - n * go) / jw
+            g = (exp_jw - m * go) / jw
     return g
 
 
@@ -1330,14 +1330,6 @@ def generate_result_files(
     return now, file_name
 
 
-def area_integral(phase_q: float, phase_p: float, phase_origin: float):
-    phase_difference = phase_q - phase_p
-    exp_phase_origin = cmath.exp(1j * phase_origin)
-    exp_phase_p = cmath.exp(1j * phase_p)
-    exp_phase_q = cmath.exp(1j * phase_q)
-    return phase_difference, exp_phase_origin, exp_phase_p, exp_phase_q
-
-
 def calculate_ic(
     phase_p: float,
     phase_q: float,
@@ -1429,9 +1421,9 @@ if NUMBA_AVAILABLE:
         exp_jw = np.exp(jw)
         g = (exp_jw - 1) / jw
         if n > 0:
-            for _ in range(1, n + 1):
+            for m in range(1, n + 1):
                 go = g
-                g = (exp_jw - n * go) / jw
+                g = (exp_jw - m * go) / jw
         return g
 
     @njit(cache=True)
@@ -1654,11 +1646,248 @@ if NUMBA_AVAILABLE:
             )
 
             diffuse_scale = roughness_factor_secondary * triangle_area * (local_cosine_theta**2)
-            diffuse_exponent = (
-                -(
-                    (normalized_correlation_distance * math.pi * local_sine_theta / wavelength_m)
-                    ** 2
+            diffuse_exponent = -(
+                (normalized_correlation_distance * math.pi * local_sine_theta / wavelength_m) ** 2
+            )
+            diffuse_component = diffuse_scale * math.exp(diffuse_exponent)
+
+            scattered_local_x = local_surface_current_x * area_integral_value
+            scattered_local_y = local_surface_current_y * area_integral_value
+            diffuse_local_x = local_surface_current_x * diffuse_component
+            diffuse_local_y = local_surface_current_y * diffuse_component
+
+            scattered_global_x = (
+                cosine_alpha * cosine_beta * scattered_local_x - sine_alpha * scattered_local_y
+            )
+            scattered_global_y = (
+                sine_alpha * cosine_beta * scattered_local_x + cosine_alpha * scattered_local_y
+            )
+            scattered_global_z = -sine_beta * scattered_local_x
+
+            diffuse_global_x = (
+                cosine_alpha * cosine_beta * diffuse_local_x - sine_alpha * diffuse_local_y
+            )
+            diffuse_global_y = (
+                sine_alpha * cosine_beta * diffuse_local_x + cosine_alpha * diffuse_local_y
+            )
+            diffuse_global_z = -sine_beta * diffuse_local_x
+
+            theta_component += (
+                theta_projection_u * scattered_global_x
+                + theta_projection_v * scattered_global_y
+                + theta_projection_w * scattered_global_z
+            )
+            phi_component += -sine_phi * scattered_global_x + cosine_phi * scattered_global_y
+            diffuse_theta += abs(
+                theta_projection_u * diffuse_global_x
+                + theta_projection_v * diffuse_global_y
+                + theta_projection_w * diffuse_global_z
+            )
+            diffuse_phi += abs(-sine_phi * diffuse_global_x + cosine_phi * diffuse_global_y)
+
+        return theta_component, phi_component, diffuse_theta, diffuse_phi
+
+    @njit(cache=True)
+    def _accumulate_bistatic_sample_numba(
+        illumination_flag_mode: int,
+        illumination_flags: np.ndarray,
+        resistivity_values: np.ndarray,
+        triangle_areas: np.ndarray,
+        surface_alpha_cos: np.ndarray,
+        surface_alpha_sin: np.ndarray,
+        surface_beta_cos: np.ndarray,
+        surface_beta_sin: np.ndarray,
+        surface_normal_x: np.ndarray,
+        surface_normal_y: np.ndarray,
+        surface_normal_z: np.ndarray,
+        phase_p_x: np.ndarray,
+        phase_p_y: np.ndarray,
+        phase_p_z: np.ndarray,
+        phase_q_x: np.ndarray,
+        phase_q_y: np.ndarray,
+        phase_q_z: np.ndarray,
+        phase_o_x: np.ndarray,
+        phase_o_y: np.ndarray,
+        phase_o_z: np.ndarray,
+        incident_direction_u: float,
+        incident_direction_v: float,
+        incident_direction_w: float,
+        observation_direction_u: float,
+        observation_direction_v: float,
+        observation_direction_w: float,
+        theta_projection_u: float,
+        theta_projection_v: float,
+        theta_projection_w: float,
+        sine_phi: float,
+        cosine_phi: float,
+        incident_field_x: complex,
+        incident_field_y: complex,
+        incident_field_z: complex,
+        wave_number: float,
+        roughness_factor_secondary: float,
+        normalized_correlation_distance: float,
+        wavelength_m: float,
+        incident_amplitude: float,
+        taylor_terms: int,
+        taylor_threshold: float,
+    ) -> tuple[complex, complex, float, float]:
+        theta_component = 0.0 + 0.0j
+        phi_component = 0.0 + 0.0j
+        diffuse_theta = 0.0
+        diffuse_phi = 0.0
+
+        combined_direction_u = observation_direction_u + incident_direction_u
+        combined_direction_v = observation_direction_v + incident_direction_v
+        combined_direction_w = observation_direction_w + incident_direction_w
+        triangle_count = triangle_areas.shape[0]
+
+        for triangle_index in range(triangle_count):
+            incident_normal_dot = (
+                surface_normal_x[triangle_index] * incident_direction_u
+                + surface_normal_y[triangle_index] * incident_direction_v
+                + surface_normal_z[triangle_index] * incident_direction_w
+            )
+            if illumination_flag_mode == 0:
+                illumination_flag = illumination_flags[triangle_index]
+                if not (
+                    (illumination_flag == 1 and incident_normal_dot >= 0.0)
+                    or illumination_flag == 0
+                ):
+                    continue
+
+            cosine_alpha = surface_alpha_cos[triangle_index]
+            sine_alpha = surface_alpha_sin[triangle_index]
+            cosine_beta = surface_beta_cos[triangle_index]
+            sine_beta = surface_beta_sin[triangle_index]
+
+            rotated_incident_u = (
+                cosine_alpha * incident_direction_u + sine_alpha * incident_direction_v
+            )
+            incident_local_u = cosine_beta * rotated_incident_u - sine_beta * incident_direction_w
+            incident_local_v = (
+                -sine_alpha * incident_direction_u + cosine_alpha * incident_direction_v
+            )
+            incident_local_w = sine_beta * rotated_incident_u + cosine_beta * incident_direction_w
+
+            incident_local_radial = math.hypot(incident_local_u, incident_local_v)
+            incident_local_sine_theta = (
+                incident_local_radial if incident_local_w >= 0 else -incident_local_radial
+            )
+            if incident_local_sine_theta > 1.0:
+                incident_local_sine_theta = 1.0
+            elif incident_local_sine_theta < -1.0:
+                incident_local_sine_theta = -1.0
+            incident_local_cosine_theta = abs(incident_local_w)
+            if incident_local_radial <= 1e-12:
+                cosine_incident_phi = 1.0
+                sine_incident_phi = 0.0
+            else:
+                inverse_incident_local_radial = 1.0 / incident_local_radial
+                cosine_incident_phi = incident_local_u * inverse_incident_local_radial
+                sine_incident_phi = incident_local_v * inverse_incident_local_radial
+
+            rotated_observation_u = (
+                cosine_alpha * observation_direction_u + sine_alpha * observation_direction_v
+            )
+            observation_local_u = (
+                cosine_beta * rotated_observation_u - sine_beta * observation_direction_w
+            )
+            observation_local_v = (
+                -sine_alpha * observation_direction_u + cosine_alpha * observation_direction_v
+            )
+            observation_local_w = (
+                sine_beta * rotated_observation_u + cosine_beta * observation_direction_w
+            )
+
+            observation_local_radial = math.hypot(observation_local_u, observation_local_v)
+            observation_local_sine_theta = (
+                observation_local_radial if observation_local_w >= 0 else -observation_local_radial
+            )
+            if observation_local_sine_theta > 1.0:
+                observation_local_sine_theta = 1.0
+            elif observation_local_sine_theta < -1.0:
+                observation_local_sine_theta = -1.0
+            observation_local_cosine_theta = abs(observation_local_w)
+
+            phase_p = wave_number * (
+                phase_p_x[triangle_index] * combined_direction_u
+                + phase_p_y[triangle_index] * combined_direction_v
+                + phase_p_z[triangle_index] * combined_direction_w
+            )
+            phase_q = wave_number * (
+                phase_q_x[triangle_index] * combined_direction_u
+                + phase_q_y[triangle_index] * combined_direction_v
+                + phase_q_z[triangle_index] * combined_direction_w
+            )
+            phase_origin = wave_number * (
+                phase_o_x[triangle_index] * combined_direction_u
+                + phase_o_y[triangle_index] * combined_direction_v
+                + phase_o_z[triangle_index] * combined_direction_w
+            )
+
+            rotated_field_x = cosine_alpha * incident_field_x + sine_alpha * incident_field_y
+            rotated_field_y = -sine_alpha * incident_field_x + cosine_alpha * incident_field_y
+            local_field_x = cosine_beta * rotated_field_x - sine_beta * incident_field_z
+            local_field_y = rotated_field_y
+            local_field_z = sine_beta * rotated_field_x + cosine_beta * incident_field_z
+
+            local_theta_field = (
+                local_field_x * incident_local_cosine_theta * cosine_incident_phi
+                + local_field_y * incident_local_cosine_theta * sine_incident_phi
+                - local_field_z * incident_local_sine_theta
+            )
+            local_phi_field = (
+                -local_field_x * sine_incident_phi + local_field_y * cosine_incident_phi
+            )
+
+            resistivity = resistivity_values[triangle_index]
+            reflection_perpendicular = -1.0 / (
+                2.0 * resistivity * observation_local_cosine_theta + 1.0
+            )
+            reflection_parallel = 0.0
+            reflection_parallel_denominator = 2.0 * resistivity + observation_local_cosine_theta
+            if reflection_parallel_denominator != 0.0:
+                reflection_parallel = (
+                    -observation_local_cosine_theta / reflection_parallel_denominator
                 )
+
+            local_surface_current_x = (
+                -local_theta_field * cosine_incident_phi * reflection_parallel
+                + local_phi_field
+                * sine_incident_phi
+                * reflection_perpendicular
+                * incident_local_cosine_theta
+            )
+            local_surface_current_y = (
+                -local_theta_field * sine_incident_phi * reflection_parallel
+                - local_phi_field
+                * cosine_incident_phi
+                * reflection_perpendicular
+                * incident_local_cosine_theta
+            )
+
+            triangle_area = triangle_areas[triangle_index]
+            area_integral_value = _calculate_ic_numba(
+                phase_p,
+                phase_q,
+                phase_origin,
+                taylor_terms,
+                triangle_area,
+                incident_amplitude,
+                taylor_threshold,
+            )
+
+            diffuse_scale = (
+                roughness_factor_secondary * triangle_area * (observation_local_cosine_theta**2)
+            )
+            diffuse_exponent = -(
+                (
+                    normalized_correlation_distance
+                    * math.pi
+                    * observation_local_sine_theta
+                    / wavelength_m
+                )
+                ** 2
             )
             diffuse_component = diffuse_scale * math.exp(diffuse_exponent)
 
@@ -1702,6 +1931,9 @@ if NUMBA_AVAILABLE:
 else:
 
     def _accumulate_monostatic_sample_numba(*_args, **_kwargs):
+        raise RuntimeError("Numba acceleration requested but numba is not installed.")
+
+    def _accumulate_bistatic_sample_numba(*_args, **_kwargs):
         raise RuntimeError("Numba acceleration requested but numba is not installed.")
 
 
@@ -1780,6 +2012,96 @@ def accumulate_monostatic_sample_numba(
         incident_field_y,
         incident_field_z,
         two_wave_number,
+        roughness_factor_secondary,
+        normalized_correlation_distance,
+        wavelength_m,
+        incident_amplitude,
+        taylor_terms,
+        taylor_threshold,
+    )
+
+
+def accumulate_bistatic_sample_numba(
+    *,
+    illumination_flag_mode: int,
+    illumination_flags: np.ndarray,
+    resistivity_values: np.ndarray,
+    triangle_areas: np.ndarray,
+    surface_alpha_cos: np.ndarray,
+    surface_alpha_sin: np.ndarray,
+    surface_beta_cos: np.ndarray,
+    surface_beta_sin: np.ndarray,
+    surface_normal_x: np.ndarray,
+    surface_normal_y: np.ndarray,
+    surface_normal_z: np.ndarray,
+    phase_p_x: np.ndarray,
+    phase_p_y: np.ndarray,
+    phase_p_z: np.ndarray,
+    phase_q_x: np.ndarray,
+    phase_q_y: np.ndarray,
+    phase_q_z: np.ndarray,
+    phase_o_x: np.ndarray,
+    phase_o_y: np.ndarray,
+    phase_o_z: np.ndarray,
+    incident_direction_u: float,
+    incident_direction_v: float,
+    incident_direction_w: float,
+    observation_direction_u: float,
+    observation_direction_v: float,
+    observation_direction_w: float,
+    theta_projection_u: float,
+    theta_projection_v: float,
+    theta_projection_w: float,
+    sine_phi: float,
+    cosine_phi: float,
+    incident_field_x: complex,
+    incident_field_y: complex,
+    incident_field_z: complex,
+    wave_number: float,
+    roughness_factor_secondary: float,
+    normalized_correlation_distance: float,
+    wavelength_m: float,
+    incident_amplitude: float,
+    taylor_terms: int,
+    taylor_threshold: float,
+) -> tuple[complex, complex, float, float]:
+    """Numba-accelerated bistatic accumulation for one (phi, theta) sample."""
+    return _accumulate_bistatic_sample_numba(
+        illumination_flag_mode,
+        illumination_flags,
+        resistivity_values,
+        triangle_areas,
+        surface_alpha_cos,
+        surface_alpha_sin,
+        surface_beta_cos,
+        surface_beta_sin,
+        surface_normal_x,
+        surface_normal_y,
+        surface_normal_z,
+        phase_p_x,
+        phase_p_y,
+        phase_p_z,
+        phase_q_x,
+        phase_q_y,
+        phase_q_z,
+        phase_o_x,
+        phase_o_y,
+        phase_o_z,
+        incident_direction_u,
+        incident_direction_v,
+        incident_direction_w,
+        observation_direction_u,
+        observation_direction_v,
+        observation_direction_w,
+        theta_projection_u,
+        theta_projection_v,
+        theta_projection_w,
+        sine_phi,
+        cosine_phi,
+        incident_field_x,
+        incident_field_y,
+        incident_field_z,
+        wave_number,
         roughness_factor_secondary,
         normalized_correlation_distance,
         wavelength_m,
