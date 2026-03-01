@@ -287,8 +287,8 @@ def build_plotly_figures(
             i=mesh_faces[:, 0],
             j=mesh_faces[:, 1],
             k=mesh_faces[:, 2],
-            color="lightgray",
-            opacity=0.5,
+            color="gray",
+            opacity=1.0,
             name="STL Model",
             showscale=False,
         )
@@ -705,8 +705,8 @@ def launch_rcs_widget(project_root: str | Path = "."):
                     i=raw_faces[:, 0],
                     j=raw_faces[:, 1],
                     k=raw_faces[:, 2],
-                    color="lightsteelblue",
-                    opacity=0.75,
+                    color="gray",
+                    opacity=1.0,
                     name="STL Preview",
                     showscale=False,
                 )
@@ -1045,8 +1045,8 @@ def launch_rcs_widget(project_root: str | Path = "."):
                     i=mesh_faces_np[:, 0],
                     j=mesh_faces_np[:, 1],
                     k=mesh_faces_np[:, 2],
-                    color="lightgray",
-                    opacity=0.5,
+                    color="gray",
+                    opacity=1.0,
                     name="STL Model",
                     showscale=False,
                 )

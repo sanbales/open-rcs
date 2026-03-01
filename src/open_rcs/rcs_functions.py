@@ -48,12 +48,26 @@ MATERIAL_TYPE_COMPOSITE = "Composite"
 MATERIAL_TYPE_COMPOSITE_ON_PEC = "Composite Layer on PEC"
 MATERIAL_TYPE_MULTI_LAYER = "Multiple Layers"
 MATERIAL_TYPE_MULTI_LAYER_ON_PEC = "Multiple Layers on PEC"
+MATERIAL_CODE_PEC = 0
+MATERIAL_CODE_COMPOSITE = 1
+MATERIAL_CODE_COMPOSITE_ON_PEC = 2
+MATERIAL_CODE_MULTI_LAYER = 3
+MATERIAL_CODE_MULTI_LAYER_ON_PEC = 4
+MATERIAL_TYPE_TO_CODE: dict[str, int] = {
+    MATERIAL_TYPE_PEC: MATERIAL_CODE_PEC,
+    MATERIAL_TYPE_COMPOSITE: MATERIAL_CODE_COMPOSITE,
+    MATERIAL_TYPE_COMPOSITE_ON_PEC: MATERIAL_CODE_COMPOSITE_ON_PEC,
+    MATERIAL_TYPE_MULTI_LAYER: MATERIAL_CODE_MULTI_LAYER,
+    MATERIAL_TYPE_MULTI_LAYER_ON_PEC: MATERIAL_CODE_MULTI_LAYER_ON_PEC,
+}
 RESULTS_DIR = Path("./results")
 NUMBA_AVAILABLE = njit is not None
 MaterialLayer = list[float]
 MaterialEntry = list[str | MaterialLayer]
 MaterialTable = list[MaterialEntry]
 MaterialCatalog = dict[str, MaterialEntry]
+_NUMBA_PLACEHOLDER_INT_ARRAY = np.zeros(1, dtype=np.int32)
+_NUMBA_PLACEHOLDER_FLOAT_ARRAY = np.zeros((1, 1), dtype=np.float64)
 
 
 def get_polarization(incident_polarization: int) -> tuple[str, complex, complex]:
@@ -63,6 +77,50 @@ def get_polarization(incident_polarization: int) -> tuple[str, complex, complex]
     if incident_polarization == 1:
         return "TE-z", 0 + 0j, 1 + 0j
     raise ValueError("Invalid polarization value. Use 0 (TM-z) or 1 (TE-z).")
+
+
+def compile_material_lookup_arrays(
+    material_table: MaterialTable,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Convert heterogeneous material entries into dense numeric arrays for fast kernels."""
+    facet_count = len(material_table)
+    max_layers = max((len(entry) - LAYERS for entry in material_table), default=0)
+    max_layers = max(1, max_layers)
+
+    material_type_codes = np.zeros(facet_count, dtype=np.int32)
+    material_layer_count = np.zeros(facet_count, dtype=np.int32)
+    epsilon_r = np.zeros((facet_count, max_layers), dtype=np.float64)
+    loss_tangent = np.zeros((facet_count, max_layers), dtype=np.float64)
+    mu_r_real = np.zeros((facet_count, max_layers), dtype=np.float64)
+    mu_r_imag = np.zeros((facet_count, max_layers), dtype=np.float64)
+    thickness_m = np.zeros((facet_count, max_layers), dtype=np.float64)
+
+    for facet_index, entry in enumerate(material_table):
+        material_type = str(entry[TYPE])
+        if material_type not in MATERIAL_TYPE_TO_CODE:
+            raise ValueError(f"Unsupported material type: {material_type}")
+        material_type_codes[facet_index] = MATERIAL_TYPE_TO_CODE[material_type]
+
+        layers = cast(list[list[float]], entry[LAYERS:])
+        material_layer_count[facet_index] = len(layers)
+        for layer_index, layer in enumerate(layers):
+            if layer_index >= max_layers:
+                break
+            epsilon_r[facet_index, layer_index] = float(layer[0])
+            loss_tangent[facet_index, layer_index] = float(layer[1])
+            mu_r_real[facet_index, layer_index] = float(layer[2])
+            mu_r_imag[facet_index, layer_index] = float(layer[3])
+            thickness_m[facet_index, layer_index] = float(layer[4]) * 1e-3
+
+    return (
+        material_type_codes,
+        material_layer_count,
+        epsilon_r,
+        loss_tangent,
+        mu_r_real,
+        mu_r_imag,
+        thickness_m,
+    )
 
 
 def get_standard_deviation(
@@ -1070,6 +1128,71 @@ def refl_coeff(er1, mr1, er2, mr2, thetai):
     return gammapar, gammaperp, thetat, TIR
 
 
+def _resolve_local_incidence_theta(
+    thri: float,
+    phrii: float,
+    alpha: float,
+    beta: float,
+    local_theta: float | None,
+) -> float:
+    """Resolve local incidence angle, using precomputed local value when available."""
+    if local_theta is not None:
+        return float(local_theta)
+    transform_global_to_local = rotation_transform_matrix(alpha, beta)
+    spherical_vector = spherical_global_to_local(
+        np.array([1.0, thri, phrii], dtype=float),
+        transform_global_to_local,
+    )
+    return float(spherical_vector[THETA])
+
+
+def _mat2_mul(
+    a00: complex,
+    a01: complex,
+    a10: complex,
+    a11: complex,
+    b00: complex,
+    b01: complex,
+    b10: complex,
+    b11: complex,
+) -> tuple[complex, complex, complex, complex]:
+    """Multiply two 2x2 complex matrices represented as scalar entries."""
+    return (
+        a00 * b00 + a01 * b10,
+        a00 * b01 + a01 * b11,
+        a10 * b00 + a11 * b10,
+        a10 * b01 + a11 * b11,
+    )
+
+
+def _layer_properties(layer: list[float]) -> tuple[complex, complex, float]:
+    epsilon_r = layer[0]
+    loss_tangent = layer[1]
+    mu_r_real = layer[2]
+    mu_r_imag = layer[3]
+    thickness_m = layer[4] * 1e-3
+    epsilon_complex = epsilon_r - 1j * loss_tangent * epsilon_r
+    mu_complex = mu_r_real - 1j * mu_r_imag
+    return epsilon_complex, mu_complex, thickness_m
+
+
+def _apply_transfer_matrix(
+    m00: complex,
+    m01: complex,
+    m10: complex,
+    m11: complex,
+    gamma: complex,
+    phase: complex,
+) -> tuple[complex, complex, complex, complex]:
+    exp_phase = cmath.exp(1j * phase)
+    exp_neg_phase = cmath.exp(-1j * phase)
+    t00 = exp_phase
+    t01 = gamma * exp_neg_phase
+    t10 = gamma * exp_phase
+    t11 = exp_neg_phase
+    return _mat2_mul(m00, m01, m10, m11, t00, t01, t10, t11)
+
+
 def spher2cart(spherical_vector: np.ndarray) -> np.ndarray:
     radius = float(spherical_vector[0])
     theta = float(spherical_vector[1])
@@ -1101,297 +1224,325 @@ def spherical_global_to_local(
 
 
 def refl_coeff_composite(
-    thri: float, phrii: float, alpha: float, beta: float, freq: float, matrlLine: list
-) -> tuple[float, float]:
-    layer = matrlLine[LAYERS]
+    thri: float,
+    phrii: float,
+    alpha: float,
+    beta: float,
+    freq: float,
+    matrlLine: list,
+    local_theta: float | None = None,
+) -> tuple[complex, complex]:
+    layer = cast(list[float], matrlLine[LAYERS])
+    local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
 
-    er = layer[0] - 1j * layer[1] * layer[0]
-    mr = layer[2] - 1j * layer[3]
-    t = layer[4] * 0.001
-
-    T21 = rotation_transform_matrix(alpha, beta)
-
-    sphericalVector = spherical_global_to_local(np.array([1, thri, phrii]), T21)
-
-    G1par, G1perp, thetat, TIR = refl_coeff(1, 1, er, mr, sphericalVector[THETA])
-
-    G2par = -G1par
-    G2perp = -G1perp
-
-    v = 3e8 / np.sqrt(np.real(er) * np.real(mr))
-    wave = v / freq
-    b1 = 2 * np.pi / wave
-    phase = b1 * t
-
-    M1par = np.array(
-        [
-            [np.exp(1j * phase), G1par * np.exp(-1j * phase)],
-            [G1par * np.exp(1j * phase), np.exp(-1j * phase)],
-        ]
+    epsilon_complex, mu_complex, thickness_m = _layer_properties(layer)
+    gamma_parallel_1, gamma_perpendicular_1, _theta_t, _tir = refl_coeff(
+        1,
+        1,
+        epsilon_complex,
+        mu_complex,
+        local_incidence_theta,
     )
+    gamma_parallel_2 = -gamma_parallel_1
+    gamma_perpendicular_2 = -gamma_perpendicular_1
 
-    M1perp = np.array(
-        [
-            [np.exp(1j * phase), G1perp * np.exp(-1j * phase)],
-            [G1perp * np.exp(1j * phase), np.exp(-1j * phase)],
-        ]
+    wave_speed = 3e8 / math.sqrt(np.real(epsilon_complex) * np.real(mu_complex))
+    phase = 2.0 * math.pi * thickness_m / (wave_speed / freq)
+
+    m00p, m01p, m10p, m11p = _apply_transfer_matrix(
+        1.0 + 0j,
+        0.0 + 0j,
+        0.0 + 0j,
+        1.0 + 0j,
+        complex(gamma_parallel_1),
+        phase,
     )
-
-    M2par = np.array([[1, G2par], [G2par, 1]])
-
-    M2perp = np.array([[1, G2perp], [G2perp, 1]])
-
-    Mpar = np.dot(M1par, M2par)
-    Mperp = np.dot(M1perp, M2perp)
-
-    RCpar = Mpar[1, 0] / Mpar[0, 0]
-    RCperp = Mperp[1, 0] / Mperp[0, 0]
-
-    return RCperp, RCpar
+    m00s, m01s, m10s, m11s = _apply_transfer_matrix(
+        1.0 + 0j,
+        0.0 + 0j,
+        0.0 + 0j,
+        1.0 + 0j,
+        complex(gamma_perpendicular_1),
+        phase,
+    )
+    m00p, m01p, m10p, m11p = _mat2_mul(
+        m00p,
+        m01p,
+        m10p,
+        m11p,
+        1.0 + 0j,
+        complex(gamma_parallel_2),
+        complex(gamma_parallel_2),
+        1.0 + 0j,
+    )
+    m00s, m01s, m10s, m11s = _mat2_mul(
+        m00s,
+        m01s,
+        m10s,
+        m11s,
+        1.0 + 0j,
+        complex(gamma_perpendicular_2),
+        complex(gamma_perpendicular_2),
+        1.0 + 0j,
+    )
+    reflection_parallel = m10p / m00p
+    reflection_perpendicular = m10s / m00s
+    return reflection_perpendicular, reflection_parallel
 
 
 def refl_coeff_composite_layer_on_pec(
-    thri: float, phrii: float, alpha: float, beta: float, freq: float, matrlLine: list
-) -> tuple[float, float]:
-    layers = matrlLine[LAYERS:]
+    thri: float,
+    phrii: float,
+    alpha: float,
+    beta: float,
+    freq: float,
+    matrlLine: list,
+    local_theta: float | None = None,
+) -> tuple[complex, complex]:
+    layers = cast(list[list[float]], matrlLine[LAYERS:])
+    local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
+    sine_incidence = math.sin(local_incidence_theta)
+    cosine_incidence = math.cos(local_incidence_theta)
 
-    T21 = rotation_transform_matrix(alpha, beta)
-    sphericalVector = spherical_global_to_local(np.array([1, thri, phrii]), T21)
-
-    PEC = np.array([[1, 0], [-1, 0]])
-
-    WMatrix_par = np.eye(2)
-    WMatrix_perp = np.eye(2)
-    Z0 = 1
     wave = 3e8 / freq
-    B0 = 2 * np.pi / wave
-    thinc = sphericalVector[THETA]
+    beta_0 = 2.0 * math.pi / wave
+    z_0 = 1.0 + 0j
 
-    Z_par = []
-    Z_perp = []
-    Beta = []
-    gamma_par = []
-    gamma_perp = []
-    tau_par = []
-    tau_perp = []
+    w00p, w01p, w10p, w11p = 1.0 + 0j, 0.0 + 0j, 0.0 + 0j, 1.0 + 0j
+    w00s, w01s, w10s, w11s = 1.0 + 0j, 0.0 + 0j, 0.0 + 0j, 1.0 + 0j
+    previous_z_parallel: complex | None = None
+    previous_z_perpendicular: complex | None = None
 
-    for i, layer in enumerate(layers):
-        erp = layer[0]
-        erdp = erp * layer[1]
-        erc = erp - 1j * erdp
-        urp = layer[2]
-        urdp = layer[3]
-        urc = urp - 1j * urdp
-        t = layer[4] * 1e-3
+    for layer_index, layer in enumerate(layers):
+        epsilon_complex, mu_complex, thickness_m = _layer_properties(layer)
+        impedance_ratio = epsilon_complex / mu_complex
+        root_term = cmath.sqrt(impedance_ratio - sine_incidence**2)
+        z_parallel = root_term / (impedance_ratio * cosine_incidence)
+        z_perpendicular = cosine_incidence / root_term
 
-        Z_par.append(np.sqrt(erc / urc - np.sin(thinc) ** 2) / (erc / urc * np.cos(thinc)))
-        Z_perp.append(np.cos(thinc) / np.sqrt(erc / urc - np.sin(thinc) ** 2))
-        Beta.append(2 * np.pi / (wave / np.sqrt(np.real(erc) * np.real(urc))))
-
-        if i == 0:
-            gamma_par.append((Z_par[i] - Z0) / (Z_par[i] + Z0))
-            gamma_perp.append((Z_perp[i] - Z0) / (Z_perp[i] + Z0))
+        if layer_index == 0:
+            gamma_parallel = (z_parallel - z_0) / (z_parallel + z_0)
+            gamma_perpendicular = (z_perpendicular - z_0) / (z_perpendicular + z_0)
         else:
-            gamma_par.append((Z_par[i] - Z_par[i - 1]) / (Z_par[i] + Z_par[i - 1]))
-            gamma_perp.append((Z_perp[i] - Z_perp[i - 1]) / (Z_perp[i] + Z_perp[i - 1]))
+            assert previous_z_parallel is not None
+            assert previous_z_perpendicular is not None
+            gamma_parallel = (z_parallel - previous_z_parallel) / (z_parallel + previous_z_parallel)
+            gamma_perpendicular = (z_perpendicular - previous_z_perpendicular) / (
+                z_perpendicular + previous_z_perpendicular
+            )
 
-        tau_par.append(1 + gamma_par[i])
-        tau_perp.append(1 + gamma_perp[i])
-        phi_calc = B0 * t * np.sqrt(erc * urc - np.sin(thinc) ** 2)
+        previous_z_parallel = z_parallel
+        previous_z_perpendicular = z_perpendicular
+        tau_parallel = 1.0 + gamma_parallel
+        tau_perpendicular = 1.0 + gamma_perpendicular
+        phase = beta_0 * thickness_m * cmath.sqrt(epsilon_complex * mu_complex - sine_incidence**2)
 
-        T_par = np.array(
-            [
-                [np.exp(1j * phi_calc), gamma_par[i] * np.exp(-1j * phi_calc)],
-                [gamma_par[i] * np.exp(1j * phi_calc), np.exp(-1j * phi_calc)],
-            ]
+        w00p, w01p, w10p, w11p = _apply_transfer_matrix(
+            w00p,
+            w01p,
+            w10p,
+            w11p,
+            gamma_parallel,
+            phase,
         )
-
-        WMatrix_par = 1 / tau_par[i] * WMatrix_par @ T_par
-
-        T_perp = np.array(
-            [
-                [np.exp(1j * phi_calc), gamma_perp[i] * np.exp(-1j * phi_calc)],
-                [gamma_perp[i] * np.exp(1j * phi_calc), np.exp(-1j * phi_calc)],
-            ]
+        w00s, w01s, w10s, w11s = _apply_transfer_matrix(
+            w00s,
+            w01s,
+            w10s,
+            w11s,
+            gamma_perpendicular,
+            phase,
         )
+        inverse_tau_parallel = 1.0 / tau_parallel
+        inverse_tau_perpendicular = 1.0 / tau_perpendicular
+        w00p *= inverse_tau_parallel
+        w01p *= inverse_tau_parallel
+        w10p *= inverse_tau_parallel
+        w11p *= inverse_tau_parallel
+        w00s *= inverse_tau_perpendicular
+        w01s *= inverse_tau_perpendicular
+        w10s *= inverse_tau_perpendicular
+        w11s *= inverse_tau_perpendicular
 
-        WMatrix_perp = 1 / tau_perp[i] * WMatrix_perp @ T_perp
-
-    WMatrix_par = WMatrix_par @ PEC
-    WMatrix_perp = WMatrix_perp @ PEC
-
-    RCperp = WMatrix_perp[1, 0] / WMatrix_perp[0, 0]
-    RCpar = WMatrix_par[1, 0] / WMatrix_par[0, 0]
-    return RCperp, RCpar
+    # Right-multiply by PEC matrix [[1, 0], [-1, 0]] and take ratio [1,0]/[0,0].
+    reflection_parallel = (w10p - w11p) / (w00p - w01p)
+    reflection_perpendicular = (w10s - w11s) / (w00s - w01s)
+    return reflection_perpendicular, reflection_parallel
 
 
 def refl_coeff_multi_layers(
-    thri: float, phrii: float, alpha: float, beta: float, freq: float, matrlLine: list
-) -> tuple[float, float]:
+    thri: float,
+    phrii: float,
+    alpha: float,
+    beta: float,
+    freq: float,
+    matrlLine: list,
+    local_theta: float | None = None,
+) -> tuple[complex, complex]:
+    layers = cast(list[list[float]], matrlLine[LAYERS:])
+    local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
 
-    T21 = rotation_transform_matrix(alpha, beta)
-    sphericalVector = spherical_global_to_local(np.array([1, thri, phrii]), T21)
-    layers = matrlLine[LAYERS:]
-    Mpar = np.eye(2)
-    Mperp = np.eye(2)
+    m00p, m01p, m10p, m11p = 1.0 + 0j, 0.0 + 0j, 0.0 + 0j, 1.0 + 0j
+    m00s, m01s, m10s, m11s = 1.0 + 0j, 0.0 + 0j, 0.0 + 0j, 1.0 + 0j
 
-    er: list[complex] = []
-    mr: list[complex] = []
-    t: list[float] = []
-    thetat: list[complex] = []
+    previous_epsilon = 1.0 + 0j
+    previous_mu = 1.0 + 0j
+    previous_theta = local_incidence_theta
+    last_phase = 0.0 + 0j
 
-    for i, layer in enumerate(layers):
-        er.append(layer[0] - 1j * layer[1] * layer[0])
-        mr.append(layer[2] - 1j * layer[3])
-        t.append(layer[4] * 0.001)
-
-        if i == 0:
-            Gpar, Gperp, thetatI, TIR = refl_coeff(1, 1, er[i], mr[i], sphericalVector[THETA])
+    for layer_index, layer in enumerate(layers):
+        epsilon_complex, mu_complex, thickness_m = _layer_properties(layer)
+        if layer_index == 0:
+            gamma_parallel, gamma_perpendicular, theta_transmitted, _tir = refl_coeff(
+                1.0 + 0j,
+                1.0 + 0j,
+                epsilon_complex,
+                mu_complex,
+                local_incidence_theta,
+            )
         else:
-            Gpar, Gperp, thetatI, TIR = refl_coeff(
-                er[i - 1], mr[i - 1], er[i], mr[i], thetat[i - 1]
+            gamma_parallel, gamma_perpendicular, theta_transmitted, _tir = refl_coeff(
+                previous_epsilon,
+                previous_mu,
+                epsilon_complex,
+                mu_complex,
+                previous_theta,
             )
 
-        thetat.append(thetatI)
-        v = 3e8 / np.sqrt(np.real(er[i]) * np.real(mr[i]))
-        wave = v / freq
-        b1 = 2 * np.pi / wave
-        phase = b1 * t[i]
-
-        Mpar = Mpar @ np.array(
-            [
-                [np.exp(1j * phase), Gpar * np.exp(-1j * phase)],
-                [Gpar * np.exp(1j * phase), np.exp(-1j * phase)],
-            ]
+        wave_speed = 3e8 / math.sqrt(np.real(epsilon_complex) * np.real(mu_complex))
+        last_phase = 2.0 * math.pi * thickness_m / (wave_speed / freq)
+        m00p, m01p, m10p, m11p = _apply_transfer_matrix(
+            m00p,
+            m01p,
+            m10p,
+            m11p,
+            complex(gamma_parallel),
+            last_phase,
         )
-        Mperp = Mperp @ np.array(
-            [
-                [np.exp(1j * phase), Gperp * np.exp(-1j * phase)],
-                [Gperp * np.exp(1j * phase), np.exp(-1j * phase)],
-            ]
+        m00s, m01s, m10s, m11s = _apply_transfer_matrix(
+            m00s,
+            m01s,
+            m10s,
+            m11s,
+            complex(gamma_perpendicular),
+            last_phase,
         )
+        previous_epsilon = epsilon_complex
+        previous_mu = mu_complex
+        previous_theta = float(theta_transmitted)
 
-    Gpar, Gperp, thetatdum, TIR = refl_coeff(er[-1], mr[-1], 1, 1, thetat[-1])
-
-    Mpar = Mpar @ np.array(
-        [
-            [np.exp(1j * phase), Gpar * np.exp(-1j * phase)],
-            [Gpar * np.exp(1j * phase), np.exp(-1j * phase)],
-        ]
+    gamma_parallel_exit, gamma_perpendicular_exit, _theta_exit, _tir = refl_coeff(
+        previous_epsilon,
+        previous_mu,
+        1.0 + 0j,
+        1.0 + 0j,
+        previous_theta,
     )
-    Mperp = Mperp @ np.array(
-        [
-            [np.exp(1j * phase), Gperp * np.exp(-1j * phase)],
-            [Gperp * np.exp(1j * phase), np.exp(-1j * phase)],
-        ]
+    m00p, m01p, m10p, m11p = _apply_transfer_matrix(
+        m00p,
+        m01p,
+        m10p,
+        m11p,
+        complex(gamma_parallel_exit),
+        last_phase,
     )
-
-    RCpar = Mpar[1, 0] / Mpar[0, 0]
-    RCperp = Mperp[1, 0] / Mperp[0, 0]
-    return RCperp, RCpar
+    m00s, m01s, m10s, m11s = _apply_transfer_matrix(
+        m00s,
+        m01s,
+        m10s,
+        m11s,
+        complex(gamma_perpendicular_exit),
+        last_phase,
+    )
+    reflection_parallel = m10p / m00p
+    reflection_perpendicular = m10s / m00s
+    return reflection_perpendicular, reflection_parallel
 
 
 def refl_coeff_multi_layers_on_pec(
-    thri: float, phrii: float, alpha: float, beta: float, freq: float, matrlLine: list
-) -> tuple[float, float]:
-    T21 = rotation_transform_matrix(alpha, beta)
-    sphericalVector = spherical_global_to_local(np.array([1, thri, phrii]), T21)
-    layers = matrlLine[LAYERS:]
-    WMatrix_par = np.eye(2)
-    WMatrix_perp = np.eye(2)
-
-    PEC = np.array([[1, 0], [-1, 0]])
-
-    Z0 = 1
-    wave = 3e8 / freq
-    B0 = 2 * np.pi / wave
-    thinc = sphericalVector[THETA]
-
-    Z_par = []
-    Z_perp = []
-    Beta = []
-    gamma_par = []
-    gamma_perp = []
-    tau_par = []
-    tau_perp = []
-
-    for i, layer in enumerate(layers):
-        erp = layer[0]
-        erdp = erp * layer[1]
-        erc = erp - 1j * erdp
-        urp = layer[2]
-        urdp = layer[3]
-        urc = urp - 1j * urdp
-        t = layer[4] * 1e-3
-
-        Z_par.append(np.sqrt(erc / urc - np.sin(thinc) ** 2) / (erc / urc * np.cos(thinc)))
-        Z_perp.append(np.cos(thinc) / np.sqrt(erc / urc - np.sin(thinc) ** 2))
-        Beta.append(2 * np.pi / (wave / np.sqrt(np.real(erc) * np.real(urc))))
-
-        if i == 0:
-            gamma_par.append((Z_par[i] - Z0) / (Z_par[i] + Z0))
-            gamma_perp.append((Z_perp[i] - Z0) / (Z_perp[i] + Z0))
-        else:
-            gamma_par.append((Z_par[i] - Z_par[i - 1]) / (Z_par[i] + Z_par[i - 1]))
-            gamma_perp.append((Z_perp[i] - Z_perp[i - 1]) / (Z_perp[i] + Z_perp[i - 1]))
-
-        tau_par.append(1 + gamma_par[i])
-        tau_perp.append(1 + gamma_perp[i])
-        phi_calc = B0 * t * (erc * urc - np.sin(thinc) ** 2) ** 0.5
-
-        T_par = np.array(
-            [
-                [np.exp(1j * phi_calc), gamma_par[i] * np.exp(-1j * phi_calc)],
-                [gamma_par[i] * np.exp(1j * phi_calc), np.exp(-1j * phi_calc)],
-            ]
-        )
-
-        WMatrix_par = 1 / tau_par[i] * WMatrix_par @ T_par
-
-        T_perp = np.array(
-            [
-                [np.exp(1j * phi_calc), gamma_perp[i] * np.exp(-1j * phi_calc)],
-                [gamma_perp[i] * np.exp(1j * phi_calc), np.exp(-1j * phi_calc)],
-            ]
-        )
-
-        WMatrix_perp = 1 / tau_perp[i] * WMatrix_perp @ T_perp
-
-    WMatrix_par = WMatrix_par @ PEC
-    WMatrix_perp = WMatrix_perp @ PEC
-
-    RCpar = WMatrix_par[1, 0] / WMatrix_par[0, 0]
-    RCperp = WMatrix_perp[1, 0] / WMatrix_perp[0, 0]
-
-    return RCperp, RCpar
+    thri: float,
+    phrii: float,
+    alpha: float,
+    beta: float,
+    freq: float,
+    matrlLine: list,
+    local_theta: float | None = None,
+) -> tuple[complex, complex]:
+    return refl_coeff_composite_layer_on_pec(
+        thri=thri,
+        phrii=phrii,
+        alpha=alpha,
+        beta=beta,
+        freq=freq,
+        matrlLine=matrlLine,
+        local_theta=local_theta,
+    )
 
 
 def get_reflection_coeff_from_material(
-    thri: float, phrii: float, alpha: float, beta: float, freq: float, matrlLine: list
-) -> tuple[float, float]:
-    RCperp: float = 0.0
-    RCpar: float = 0.0
+    thri: float,
+    phrii: float,
+    alpha: float,
+    beta: float,
+    freq: float,
+    matrlLine: list,
+    local_theta: float | None = None,
+) -> tuple[complex, complex]:
+    reflection_perpendicular: complex = 0.0 + 0.0j
+    reflection_parallel: complex = 0.0 + 0.0j
 
     if matrlLine[TYPE] == MATERIAL_TYPE_PEC:
-        RCperp = -1
-        RCpar = -1
+        reflection_perpendicular = -1.0 + 0.0j
+        reflection_parallel = -1.0 + 0.0j
 
     elif matrlLine[TYPE] == MATERIAL_TYPE_COMPOSITE:
-        RCperp, RCpar = refl_coeff_composite(thri, phrii, alpha, beta, freq, matrlLine)
+        reflection_perpendicular, reflection_parallel = refl_coeff_composite(
+            thri,
+            phrii,
+            alpha,
+            beta,
+            freq,
+            matrlLine,
+            local_theta=local_theta,
+        )
 
     elif matrlLine[TYPE] == MATERIAL_TYPE_COMPOSITE_ON_PEC:
-        RCperp, RCpar = refl_coeff_composite_layer_on_pec(thri, phrii, alpha, beta, freq, matrlLine)
+        reflection_perpendicular, reflection_parallel = refl_coeff_composite_layer_on_pec(
+            thri,
+            phrii,
+            alpha,
+            beta,
+            freq,
+            matrlLine,
+            local_theta=local_theta,
+        )
 
     elif matrlLine[TYPE] == MATERIAL_TYPE_MULTI_LAYER:
-        RCperp, RCpar = refl_coeff_multi_layers(thri, phrii, alpha, beta, freq, matrlLine)
+        reflection_perpendicular, reflection_parallel = refl_coeff_multi_layers(
+            thri,
+            phrii,
+            alpha,
+            beta,
+            freq,
+            matrlLine,
+            local_theta=local_theta,
+        )
 
     elif matrlLine[TYPE] == MATERIAL_TYPE_MULTI_LAYER_ON_PEC:
-        RCperp, RCpar = refl_coeff_multi_layers_on_pec(thri, phrii, alpha, beta, freq, matrlLine)
+        reflection_perpendicular, reflection_parallel = refl_coeff_multi_layers_on_pec(
+            thri,
+            phrii,
+            alpha,
+            beta,
+            freq,
+            matrlLine,
+            local_theta=local_theta,
+        )
     else:
         material_type = str(matrlLine[TYPE])
         raise ValueError(f"Unsupported material type: {material_type}")
 
-    return RCperp, RCpar
+    return reflection_perpendicular, reflection_parallel
 
 
 def reflection_coefficients(
@@ -1405,22 +1556,30 @@ def reflection_coefficients(
     freq: float,
     matrl: list,
     local_cos_theta: float | None = None,
-) -> tuple[float, float]:
-    perp: float = 0.0
-    para: float = 0.0
+) -> tuple[complex, complex]:
+    reflection_perpendicular: complex = 0.0 + 0.0j
+    reflection_parallel: complex = 0.0 + 0.0j
 
     if rs == MATERIAL_SPECIFIC:
-        perp, para = get_reflection_coeff_from_material(
-            thri, phrii, alpha, beta, freq, matrl[index]
+        reflection_perpendicular, reflection_parallel = get_reflection_coeff_from_material(
+            thri,
+            phrii,
+            alpha,
+            beta,
+            freq,
+            matrl[index],
+            local_theta=th2,
         )
     else:
         cosine_local_theta = math.cos(th2) if local_cos_theta is None else local_cos_theta
-        perp = -1 / (2 * rs * cosine_local_theta + 1)  # local TE polarization
-        para = 0  # local TM polarization
+        reflection_perpendicular = complex(
+            -1 / (2 * rs * cosine_local_theta + 1)
+        )  # local TE polarization
+        reflection_parallel = 0.0 + 0.0j  # local TM polarization
         if (2 * rs + cosine_local_theta) != 0:
-            para = -cosine_local_theta / (2 * rs + cosine_local_theta)
+            reflection_parallel = complex(-cosine_local_theta / (2 * rs + cosine_local_theta))
 
-    return perp, para
+    return reflection_perpendicular, reflection_parallel
 
 
 def final_plot(
@@ -1729,6 +1888,305 @@ if NUMBA_AVAILABLE:
         )
 
     @njit(cache=True)
+    def _mat2_mul_numba(
+        a00: complex,
+        a01: complex,
+        a10: complex,
+        a11: complex,
+        b00: complex,
+        b01: complex,
+        b10: complex,
+        b11: complex,
+    ) -> tuple[complex, complex, complex, complex]:  # pragma: no cover
+        return (
+            a00 * b00 + a01 * b10,
+            a00 * b01 + a01 * b11,
+            a10 * b00 + a11 * b10,
+            a10 * b01 + a11 * b11,
+        )
+
+    @njit(cache=True)
+    def _apply_transfer_matrix_numba(
+        m00: complex,
+        m01: complex,
+        m10: complex,
+        m11: complex,
+        gamma: complex,
+        phase: complex,
+    ) -> tuple[complex, complex, complex, complex]:  # pragma: no cover
+        exp_phase = np.exp(1j * phase)
+        exp_neg_phase = np.exp(-1j * phase)
+        t00 = exp_phase
+        t01 = gamma * exp_neg_phase
+        t10 = gamma * exp_phase
+        t11 = exp_neg_phase
+        return (
+            m00 * t00 + m01 * t10,
+            m00 * t01 + m01 * t11,
+            m10 * t00 + m11 * t10,
+            m10 * t01 + m11 * t11,
+        )
+
+    @njit(cache=True)
+    def _refl_coeff_numba(
+        er1: complex,
+        mr1: complex,
+        er2: complex,
+        mr2: complex,
+        theta_incident: float,
+    ) -> tuple[complex, complex, float, int]:  # pragma: no cover
+        permeability_vacuum = 4 * math.pi * 1e-7
+        permittivity_vacuum = 8.854e-12
+        sinthetat = math.sin(theta_incident) * math.sqrt(
+            (np.real(er1) * np.real(mr1)) / (np.real(er2) * np.real(mr2))
+        )
+        tir_flag = 0
+        if sinthetat > 1.0:
+            tir_flag = 1
+            theta_transmitted = math.pi / 2
+        else:
+            theta_transmitted = math.asin(sinthetat)
+        n1 = np.sqrt(mr1 * permeability_vacuum / (er1 * permittivity_vacuum))
+        n2 = np.sqrt(mr2 * permeability_vacuum / (er2 * permittivity_vacuum))
+        cosine_incident = math.cos(theta_incident)
+        cosine_transmitted = math.cos(theta_transmitted)
+        gamma_perpendicular = (n2 * cosine_incident - n1 * cosine_transmitted) / (
+            n2 * cosine_incident + n1 * cosine_transmitted
+        )
+        gamma_parallel = (n2 * cosine_transmitted - n1 * cosine_incident) / (
+            n2 * cosine_transmitted + n1 * cosine_incident
+        )
+        return gamma_parallel, gamma_perpendicular, theta_transmitted, tir_flag
+
+    @njit(cache=True)
+    def _material_reflection_coeff_numba(
+        local_theta: float,
+        frequency_hz: float,
+        triangle_index: int,
+        material_type_codes: np.ndarray,
+        material_layer_count: np.ndarray,
+        epsilon_r: np.ndarray,
+        loss_tangent: np.ndarray,
+        mu_r_real: np.ndarray,
+        mu_r_imag: np.ndarray,
+        thickness_m: np.ndarray,
+    ) -> tuple[complex, complex]:  # pragma: no cover
+        material_code = material_type_codes[triangle_index]
+        if material_code == MATERIAL_CODE_PEC:
+            return -1.0 + 0.0j, -1.0 + 0.0j
+
+        if material_code == MATERIAL_CODE_COMPOSITE:
+            eps = epsilon_r[triangle_index, 0]
+            loss = loss_tangent[triangle_index, 0]
+            mu_r = mu_r_real[triangle_index, 0]
+            mu_i = mu_r_imag[triangle_index, 0]
+            thickness = thickness_m[triangle_index, 0]
+            epsilon_complex = complex(eps, -loss * eps)
+            mu_complex = complex(mu_r, -mu_i)
+            gamma_parallel_1, gamma_perpendicular_1, _theta_t, _tir = _refl_coeff_numba(
+                1.0 + 0.0j,
+                1.0 + 0.0j,
+                epsilon_complex,
+                mu_complex,
+                local_theta,
+            )
+            gamma_parallel_2 = -gamma_parallel_1
+            gamma_perpendicular_2 = -gamma_perpendicular_1
+            wave_speed = 3e8 / math.sqrt(np.real(epsilon_complex) * np.real(mu_complex))
+            phase = 2.0 * math.pi * thickness / (wave_speed / frequency_hz)
+
+            m00p, m01p, m10p, m11p = _apply_transfer_matrix_numba(
+                1.0 + 0.0j,
+                0.0 + 0.0j,
+                0.0 + 0.0j,
+                1.0 + 0.0j,
+                gamma_parallel_1,
+                phase,
+            )
+            m00s, m01s, m10s, m11s = _apply_transfer_matrix_numba(
+                1.0 + 0.0j,
+                0.0 + 0.0j,
+                0.0 + 0.0j,
+                1.0 + 0.0j,
+                gamma_perpendicular_1,
+                phase,
+            )
+            m00p, m01p, m10p, m11p = _mat2_mul_numba(
+                m00p,
+                m01p,
+                m10p,
+                m11p,
+                1.0 + 0.0j,
+                gamma_parallel_2,
+                gamma_parallel_2,
+                1.0 + 0.0j,
+            )
+            m00s, m01s, m10s, m11s = _mat2_mul_numba(
+                m00s,
+                m01s,
+                m10s,
+                m11s,
+                1.0 + 0.0j,
+                gamma_perpendicular_2,
+                gamma_perpendicular_2,
+                1.0 + 0.0j,
+            )
+            return m10s / m00s, m10p / m00p
+
+        layer_count = material_layer_count[triangle_index]
+        sine_incidence = math.sin(local_theta)
+        cosine_incidence = math.cos(local_theta)
+        wave = 3e8 / frequency_hz
+        beta_0 = 2.0 * math.pi / wave
+        z_0 = 1.0 + 0.0j
+
+        w00p, w01p, w10p, w11p = 1.0 + 0.0j, 0.0 + 0.0j, 0.0 + 0.0j, 1.0 + 0.0j
+        w00s, w01s, w10s, w11s = 1.0 + 0.0j, 0.0 + 0.0j, 0.0 + 0.0j, 1.0 + 0.0j
+        previous_z_parallel = 0.0 + 0.0j
+        previous_z_perpendicular = 0.0 + 0.0j
+
+        if material_code in (MATERIAL_CODE_COMPOSITE_ON_PEC, MATERIAL_CODE_MULTI_LAYER_ON_PEC):
+            for layer_index in range(layer_count):
+                eps = epsilon_r[triangle_index, layer_index]
+                loss = loss_tangent[triangle_index, layer_index]
+                mu_r = mu_r_real[triangle_index, layer_index]
+                mu_i = mu_r_imag[triangle_index, layer_index]
+                thickness = thickness_m[triangle_index, layer_index]
+                epsilon_complex = complex(eps, -loss * eps)
+                mu_complex = complex(mu_r, -mu_i)
+                impedance_ratio = epsilon_complex / mu_complex
+                root_term = np.sqrt(impedance_ratio - sine_incidence**2)
+                z_parallel = root_term / (impedance_ratio * cosine_incidence)
+                z_perpendicular = cosine_incidence / root_term
+
+                if layer_index == 0:
+                    gamma_parallel = (z_parallel - z_0) / (z_parallel + z_0)
+                    gamma_perpendicular = (z_perpendicular - z_0) / (z_perpendicular + z_0)
+                else:
+                    gamma_parallel = (z_parallel - previous_z_parallel) / (
+                        z_parallel + previous_z_parallel
+                    )
+                    gamma_perpendicular = (z_perpendicular - previous_z_perpendicular) / (
+                        z_perpendicular + previous_z_perpendicular
+                    )
+
+                previous_z_parallel = z_parallel
+                previous_z_perpendicular = z_perpendicular
+                tau_parallel = 1.0 + gamma_parallel
+                tau_perpendicular = 1.0 + gamma_perpendicular
+                phase = (
+                    beta_0 * thickness * np.sqrt(epsilon_complex * mu_complex - sine_incidence**2)
+                )
+
+                w00p, w01p, w10p, w11p = _apply_transfer_matrix_numba(
+                    w00p,
+                    w01p,
+                    w10p,
+                    w11p,
+                    gamma_parallel,
+                    phase,
+                )
+                w00s, w01s, w10s, w11s = _apply_transfer_matrix_numba(
+                    w00s,
+                    w01s,
+                    w10s,
+                    w11s,
+                    gamma_perpendicular,
+                    phase,
+                )
+                inverse_tau_parallel = 1.0 / tau_parallel
+                inverse_tau_perpendicular = 1.0 / tau_perpendicular
+                w00p *= inverse_tau_parallel
+                w01p *= inverse_tau_parallel
+                w10p *= inverse_tau_parallel
+                w11p *= inverse_tau_parallel
+                w00s *= inverse_tau_perpendicular
+                w01s *= inverse_tau_perpendicular
+                w10s *= inverse_tau_perpendicular
+                w11s *= inverse_tau_perpendicular
+
+            reflection_parallel = (w10p - w11p) / (w00p - w01p)
+            reflection_perpendicular = (w10s - w11s) / (w00s - w01s)
+            return reflection_perpendicular, reflection_parallel
+
+        # MATERIAL_CODE_MULTI_LAYER
+        previous_epsilon = 1.0 + 0.0j
+        previous_mu = 1.0 + 0.0j
+        previous_theta = local_theta
+        last_phase = 0.0 + 0.0j
+
+        for layer_index in range(layer_count):
+            eps = epsilon_r[triangle_index, layer_index]
+            loss = loss_tangent[triangle_index, layer_index]
+            mu_r = mu_r_real[triangle_index, layer_index]
+            mu_i = mu_r_imag[triangle_index, layer_index]
+            thickness = thickness_m[triangle_index, layer_index]
+            epsilon_complex = complex(eps, -loss * eps)
+            mu_complex = complex(mu_r, -mu_i)
+            if layer_index == 0:
+                gamma_parallel, gamma_perpendicular, theta_transmitted, _tir = _refl_coeff_numba(
+                    1.0 + 0.0j,
+                    1.0 + 0.0j,
+                    epsilon_complex,
+                    mu_complex,
+                    local_theta,
+                )
+            else:
+                gamma_parallel, gamma_perpendicular, theta_transmitted, _tir = _refl_coeff_numba(
+                    previous_epsilon,
+                    previous_mu,
+                    epsilon_complex,
+                    mu_complex,
+                    previous_theta,
+                )
+            wave_speed = 3e8 / math.sqrt(np.real(epsilon_complex) * np.real(mu_complex))
+            last_phase = 2.0 * math.pi * thickness / (wave_speed / frequency_hz)
+            w00p, w01p, w10p, w11p = _apply_transfer_matrix_numba(
+                w00p,
+                w01p,
+                w10p,
+                w11p,
+                gamma_parallel,
+                last_phase,
+            )
+            w00s, w01s, w10s, w11s = _apply_transfer_matrix_numba(
+                w00s,
+                w01s,
+                w10s,
+                w11s,
+                gamma_perpendicular,
+                last_phase,
+            )
+            previous_epsilon = epsilon_complex
+            previous_mu = mu_complex
+            previous_theta = theta_transmitted
+
+        gamma_parallel_exit, gamma_perpendicular_exit, _theta_exit, _tir = _refl_coeff_numba(
+            previous_epsilon,
+            previous_mu,
+            1.0 + 0.0j,
+            1.0 + 0.0j,
+            previous_theta,
+        )
+        w00p, w01p, w10p, w11p = _apply_transfer_matrix_numba(
+            w00p,
+            w01p,
+            w10p,
+            w11p,
+            gamma_parallel_exit,
+            last_phase,
+        )
+        w00s, w01s, w10s, w11s = _apply_transfer_matrix_numba(
+            w00s,
+            w01s,
+            w10s,
+            w11s,
+            gamma_perpendicular_exit,
+            last_phase,
+        )
+        return w10s / w00s, w10p / w00p
+
+    @njit(cache=True)
     def _accumulate_monostatic_sample_numba(
         illumination_flag_mode: int,
         illumination_flags: np.ndarray,
@@ -1768,6 +2226,15 @@ if NUMBA_AVAILABLE:
         incident_amplitude: float,
         taylor_terms: int,
         taylor_threshold: float,
+        material_mode: int,
+        frequency_hz: float,
+        material_type_codes: np.ndarray,
+        material_layer_count: np.ndarray,
+        material_epsilon_r: np.ndarray,
+        material_loss_tangent: np.ndarray,
+        material_mu_r_real: np.ndarray,
+        material_mu_r_imag: np.ndarray,
+        material_thickness_m: np.ndarray,
     ) -> tuple[complex, complex, float, float]:  # pragma: no cover
         theta_component = 0.0 + 0.0j
         phi_component = 0.0 + 0.0j
@@ -1843,12 +2310,27 @@ if NUMBA_AVAILABLE:
             )
             local_phi_field = -local_field_x * local_sine_phi + local_field_y * local_cosine_phi
 
-            resistivity = resistivity_values[triangle_index]
-            reflection_perpendicular = -1.0 / (2.0 * resistivity * local_cosine_theta + 1.0)
-            reflection_parallel = 0.0
-            reflection_parallel_denominator = 2.0 * resistivity + local_cosine_theta
-            if reflection_parallel_denominator != 0.0:
-                reflection_parallel = -local_cosine_theta / reflection_parallel_denominator
+            if material_mode == 1:
+                local_theta = math.asin(local_sine_theta)
+                reflection_perpendicular, reflection_parallel = _material_reflection_coeff_numba(
+                    local_theta,
+                    frequency_hz,
+                    triangle_index,
+                    material_type_codes,
+                    material_layer_count,
+                    material_epsilon_r,
+                    material_loss_tangent,
+                    material_mu_r_real,
+                    material_mu_r_imag,
+                    material_thickness_m,
+                )
+            else:
+                resistivity = resistivity_values[triangle_index]
+                reflection_perpendicular = -1.0 / (2.0 * resistivity * local_cosine_theta + 1.0)
+                reflection_parallel = 0.0 + 0.0j
+                reflection_parallel_denominator = 2.0 * resistivity + local_cosine_theta
+                if reflection_parallel_denominator != 0.0:
+                    reflection_parallel = -local_cosine_theta / reflection_parallel_denominator
 
             local_surface_current_x = (
                 -local_theta_field * local_cosine_phi * reflection_parallel
@@ -1955,6 +2437,15 @@ if NUMBA_AVAILABLE:
         incident_amplitude: float,
         taylor_terms: int,
         taylor_threshold: float,
+        material_mode: int,
+        frequency_hz: float,
+        material_type_codes: np.ndarray,
+        material_layer_count: np.ndarray,
+        material_epsilon_r: np.ndarray,
+        material_loss_tangent: np.ndarray,
+        material_mu_r_real: np.ndarray,
+        material_mu_r_imag: np.ndarray,
+        material_thickness_m: np.ndarray,
     ) -> tuple[complex, complex, float, float]:  # pragma: no cover
         theta_component = 0.0 + 0.0j
         phi_component = 0.0 + 0.0j
@@ -2065,16 +2556,31 @@ if NUMBA_AVAILABLE:
                 -local_field_x * sine_incident_phi + local_field_y * cosine_incident_phi
             )
 
-            resistivity = resistivity_values[triangle_index]
-            reflection_perpendicular = -1.0 / (
-                2.0 * resistivity * observation_local_cosine_theta + 1.0
-            )
-            reflection_parallel = 0.0
-            reflection_parallel_denominator = 2.0 * resistivity + observation_local_cosine_theta
-            if reflection_parallel_denominator != 0.0:
-                reflection_parallel = (
-                    -observation_local_cosine_theta / reflection_parallel_denominator
+            if material_mode == 1:
+                observation_local_theta = math.acos(observation_local_cosine_theta)
+                reflection_perpendicular, reflection_parallel = _material_reflection_coeff_numba(
+                    observation_local_theta,
+                    frequency_hz,
+                    triangle_index,
+                    material_type_codes,
+                    material_layer_count,
+                    material_epsilon_r,
+                    material_loss_tangent,
+                    material_mu_r_real,
+                    material_mu_r_imag,
+                    material_thickness_m,
                 )
+            else:
+                resistivity = resistivity_values[triangle_index]
+                reflection_perpendicular = -1.0 / (
+                    2.0 * resistivity * observation_local_cosine_theta + 1.0
+                )
+                reflection_parallel = 0.0 + 0.0j
+                reflection_parallel_denominator = 2.0 * resistivity + observation_local_cosine_theta
+                if reflection_parallel_denominator != 0.0:
+                    reflection_parallel = (
+                        -observation_local_cosine_theta / reflection_parallel_denominator
+                    )
 
             local_surface_current_x = (
                 -local_theta_field * cosine_incident_phi * reflection_parallel
@@ -2245,6 +2751,119 @@ def accumulate_monostatic_sample_numba(
             incident_amplitude,
             taylor_terms,
             taylor_threshold,
+            0,
+            0.0,
+            _NUMBA_PLACEHOLDER_INT_ARRAY,
+            _NUMBA_PLACEHOLDER_INT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+        ),
+    )
+
+
+def accumulate_monostatic_sample_numba_material(
+    *,
+    illumination_flag_mode: int,
+    illumination_flags: np.ndarray,
+    resistivity_values: np.ndarray,
+    triangle_areas: np.ndarray,
+    surface_alpha_cos: np.ndarray,
+    surface_alpha_sin: np.ndarray,
+    surface_beta_cos: np.ndarray,
+    surface_beta_sin: np.ndarray,
+    surface_normal_x: np.ndarray,
+    surface_normal_y: np.ndarray,
+    surface_normal_z: np.ndarray,
+    phase_p_x: np.ndarray,
+    phase_p_y: np.ndarray,
+    phase_p_z: np.ndarray,
+    phase_q_x: np.ndarray,
+    phase_q_y: np.ndarray,
+    phase_q_z: np.ndarray,
+    phase_o_x: np.ndarray,
+    phase_o_y: np.ndarray,
+    phase_o_z: np.ndarray,
+    direction_u: float,
+    direction_v: float,
+    direction_w: float,
+    theta_projection_u: float,
+    theta_projection_v: float,
+    theta_projection_w: float,
+    sine_phi: float,
+    cosine_phi: float,
+    incident_field_x: complex,
+    incident_field_y: complex,
+    incident_field_z: complex,
+    two_wave_number: float,
+    roughness_factor_secondary: float,
+    normalized_correlation_distance: float,
+    wavelength_m: float,
+    incident_amplitude: float,
+    taylor_terms: int,
+    taylor_threshold: float,
+    frequency_hz: float,
+    material_type_codes: np.ndarray,
+    material_layer_count: np.ndarray,
+    material_epsilon_r: np.ndarray,
+    material_loss_tangent: np.ndarray,
+    material_mu_r_real: np.ndarray,
+    material_mu_r_imag: np.ndarray,
+    material_thickness_m: np.ndarray,
+) -> tuple[complex, complex, float, float]:
+    """Numba-accelerated monostatic accumulation with material-library reflections."""
+    return cast(
+        tuple[complex, complex, float, float],
+        _accumulate_monostatic_sample_numba(
+            illumination_flag_mode,
+            illumination_flags,
+            resistivity_values,
+            triangle_areas,
+            surface_alpha_cos,
+            surface_alpha_sin,
+            surface_beta_cos,
+            surface_beta_sin,
+            surface_normal_x,
+            surface_normal_y,
+            surface_normal_z,
+            phase_p_x,
+            phase_p_y,
+            phase_p_z,
+            phase_q_x,
+            phase_q_y,
+            phase_q_z,
+            phase_o_x,
+            phase_o_y,
+            phase_o_z,
+            direction_u,
+            direction_v,
+            direction_w,
+            theta_projection_u,
+            theta_projection_v,
+            theta_projection_w,
+            sine_phi,
+            cosine_phi,
+            incident_field_x,
+            incident_field_y,
+            incident_field_z,
+            two_wave_number,
+            roughness_factor_secondary,
+            normalized_correlation_distance,
+            wavelength_m,
+            incident_amplitude,
+            taylor_terms,
+            taylor_threshold,
+            1,
+            frequency_hz,
+            material_type_codes,
+            material_layer_count,
+            material_epsilon_r,
+            material_loss_tangent,
+            material_mu_r_real,
+            material_mu_r_imag,
+            material_thickness_m,
         ),
     )
 
@@ -2338,6 +2957,125 @@ def accumulate_bistatic_sample_numba(
             incident_amplitude,
             taylor_terms,
             taylor_threshold,
+            0,
+            0.0,
+            _NUMBA_PLACEHOLDER_INT_ARRAY,
+            _NUMBA_PLACEHOLDER_INT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+            _NUMBA_PLACEHOLDER_FLOAT_ARRAY,
+        ),
+    )
+
+
+def accumulate_bistatic_sample_numba_material(
+    *,
+    illumination_flag_mode: int,
+    illumination_flags: np.ndarray,
+    resistivity_values: np.ndarray,
+    triangle_areas: np.ndarray,
+    surface_alpha_cos: np.ndarray,
+    surface_alpha_sin: np.ndarray,
+    surface_beta_cos: np.ndarray,
+    surface_beta_sin: np.ndarray,
+    surface_normal_x: np.ndarray,
+    surface_normal_y: np.ndarray,
+    surface_normal_z: np.ndarray,
+    phase_p_x: np.ndarray,
+    phase_p_y: np.ndarray,
+    phase_p_z: np.ndarray,
+    phase_q_x: np.ndarray,
+    phase_q_y: np.ndarray,
+    phase_q_z: np.ndarray,
+    phase_o_x: np.ndarray,
+    phase_o_y: np.ndarray,
+    phase_o_z: np.ndarray,
+    incident_direction_u: float,
+    incident_direction_v: float,
+    incident_direction_w: float,
+    observation_direction_u: float,
+    observation_direction_v: float,
+    observation_direction_w: float,
+    theta_projection_u: float,
+    theta_projection_v: float,
+    theta_projection_w: float,
+    sine_phi: float,
+    cosine_phi: float,
+    incident_field_x: complex,
+    incident_field_y: complex,
+    incident_field_z: complex,
+    wave_number: float,
+    roughness_factor_secondary: float,
+    normalized_correlation_distance: float,
+    wavelength_m: float,
+    incident_amplitude: float,
+    taylor_terms: int,
+    taylor_threshold: float,
+    frequency_hz: float,
+    material_type_codes: np.ndarray,
+    material_layer_count: np.ndarray,
+    material_epsilon_r: np.ndarray,
+    material_loss_tangent: np.ndarray,
+    material_mu_r_real: np.ndarray,
+    material_mu_r_imag: np.ndarray,
+    material_thickness_m: np.ndarray,
+) -> tuple[complex, complex, float, float]:
+    """Numba-accelerated bistatic accumulation with material-library reflections."""
+    return cast(
+        tuple[complex, complex, float, float],
+        _accumulate_bistatic_sample_numba(
+            illumination_flag_mode,
+            illumination_flags,
+            resistivity_values,
+            triangle_areas,
+            surface_alpha_cos,
+            surface_alpha_sin,
+            surface_beta_cos,
+            surface_beta_sin,
+            surface_normal_x,
+            surface_normal_y,
+            surface_normal_z,
+            phase_p_x,
+            phase_p_y,
+            phase_p_z,
+            phase_q_x,
+            phase_q_y,
+            phase_q_z,
+            phase_o_x,
+            phase_o_y,
+            phase_o_z,
+            incident_direction_u,
+            incident_direction_v,
+            incident_direction_w,
+            observation_direction_u,
+            observation_direction_v,
+            observation_direction_w,
+            theta_projection_u,
+            theta_projection_v,
+            theta_projection_w,
+            sine_phi,
+            cosine_phi,
+            incident_field_x,
+            incident_field_y,
+            incident_field_z,
+            wave_number,
+            roughness_factor_secondary,
+            normalized_correlation_distance,
+            wavelength_m,
+            incident_amplitude,
+            taylor_terms,
+            taylor_threshold,
+            1,
+            frequency_hz,
+            material_type_codes,
+            material_layer_count,
+            material_epsilon_r,
+            material_loss_tangent,
+            material_mu_r_real,
+            material_mu_r_imag,
+            material_thickness_m,
         ),
     )
 

@@ -27,11 +27,27 @@ def simulate_monostatic(
     """Run monostatic simulation and return in-memory arrays (no disk output)."""
     material_entries: list = []
     use_material_lookup = simulation_config.material.resistivity_mode == rf.MATERIAL_SPECIFIC
+    material_type_codes = np.zeros(1, dtype=np.int32)
+    material_layer_count = np.zeros(1, dtype=np.int32)
+    material_epsilon_r = np.zeros((1, 1), dtype=np.float64)
+    material_loss_tangent = np.zeros((1, 1), dtype=np.float64)
+    material_mu_r_real = np.zeros((1, 1), dtype=np.float64)
+    material_mu_r_imag = np.zeros((1, 1), dtype=np.float64)
+    material_thickness_m = np.zeros((1, 1), dtype=np.float64)
     if use_material_lookup:
         material_entries = rf.get_entries_from_material_file(
             int(geometry_data.n_triangles),
             simulation_config.material.material_path,
         )
+        (
+            material_type_codes,
+            material_layer_count,
+            material_epsilon_r,
+            material_loss_tangent,
+            material_mu_r_real,
+            material_mu_r_imag,
+            material_thickness_m,
+        ) = rf.compile_material_lookup_arrays(material_entries)
 
     wavelength_m = 3e8 / simulation_config.frequency_hz
     normalized_correlation_distance = simulation_config.correlation_distance_m / wavelength_m
@@ -136,9 +152,7 @@ def simulate_monostatic(
     phase_o_x = phase_origin_vectors[:, 0]
     phase_o_y = phase_origin_vectors[:, 1]
     phase_o_z = phase_origin_vectors[:, 2]
-    use_numba_kernel = (
-        simulation_config.use_numba and rf.NUMBA_AVAILABLE and not use_material_lookup
-    )
+    use_numba_kernel = simulation_config.use_numba and rf.NUMBA_AVAILABLE
 
     for phi_index, phi_deg in enumerate(phi_values_deg):
         phi_radians = phi_deg * radian_factor
@@ -184,51 +198,106 @@ def simulate_monostatic(
 
             accumulated_fields = FieldAccumulator()
             if use_numba_kernel:
-                (
-                    accumulated_fields.theta_component,
-                    accumulated_fields.phi_component,
-                    accumulated_fields.diffuse_theta,
-                    accumulated_fields.diffuse_phi,
-                ) = rf.accumulate_monostatic_sample_numba(
-                    illumination_flag_mode=geometry_data.illumination_flag_mode,
-                    illumination_flags=illumination_flags,
-                    resistivity_values=resistivity_values,
-                    triangle_areas=triangle_areas,
-                    surface_alpha_cos=cosine_alpha_all,
-                    surface_alpha_sin=sine_alpha_all,
-                    surface_beta_cos=cosine_beta_all,
-                    surface_beta_sin=sine_beta_all,
-                    surface_normal_x=surface_normal_x,
-                    surface_normal_y=surface_normal_y,
-                    surface_normal_z=surface_normal_z,
-                    phase_p_x=phase_p_x,
-                    phase_p_y=phase_p_y,
-                    phase_p_z=phase_p_z,
-                    phase_q_x=phase_q_x,
-                    phase_q_y=phase_q_y,
-                    phase_q_z=phase_q_z,
-                    phase_o_x=phase_o_x,
-                    phase_o_y=phase_o_y,
-                    phase_o_z=phase_o_z,
-                    direction_u=direction_u,
-                    direction_v=direction_v,
-                    direction_w=direction_w,
-                    theta_projection_u=theta_projection_u,
-                    theta_projection_v=theta_projection_v,
-                    theta_projection_w=theta_projection_w,
-                    sine_phi=sine_phi,
-                    cosine_phi=cosine_phi,
-                    incident_field_x=incident_field_x,
-                    incident_field_y=incident_field_y,
-                    incident_field_z=incident_field_z,
-                    two_wave_number=two_wave_number,
-                    roughness_factor_secondary=roughness_factor_secondary,
-                    normalized_correlation_distance=normalized_correlation_distance,
-                    wavelength_m=wavelength_m,
-                    incident_amplitude=incident_amplitude,
-                    taylor_terms=taylor_terms,
-                    taylor_threshold=taylor_threshold,
-                )
+                if use_material_lookup:
+                    (
+                        accumulated_fields.theta_component,
+                        accumulated_fields.phi_component,
+                        accumulated_fields.diffuse_theta,
+                        accumulated_fields.diffuse_phi,
+                    ) = rf.accumulate_monostatic_sample_numba_material(
+                        illumination_flag_mode=geometry_data.illumination_flag_mode,
+                        illumination_flags=illumination_flags,
+                        resistivity_values=resistivity_values,
+                        triangle_areas=triangle_areas,
+                        surface_alpha_cos=cosine_alpha_all,
+                        surface_alpha_sin=sine_alpha_all,
+                        surface_beta_cos=cosine_beta_all,
+                        surface_beta_sin=sine_beta_all,
+                        surface_normal_x=surface_normal_x,
+                        surface_normal_y=surface_normal_y,
+                        surface_normal_z=surface_normal_z,
+                        phase_p_x=phase_p_x,
+                        phase_p_y=phase_p_y,
+                        phase_p_z=phase_p_z,
+                        phase_q_x=phase_q_x,
+                        phase_q_y=phase_q_y,
+                        phase_q_z=phase_q_z,
+                        phase_o_x=phase_o_x,
+                        phase_o_y=phase_o_y,
+                        phase_o_z=phase_o_z,
+                        direction_u=direction_u,
+                        direction_v=direction_v,
+                        direction_w=direction_w,
+                        theta_projection_u=theta_projection_u,
+                        theta_projection_v=theta_projection_v,
+                        theta_projection_w=theta_projection_w,
+                        sine_phi=sine_phi,
+                        cosine_phi=cosine_phi,
+                        incident_field_x=incident_field_x,
+                        incident_field_y=incident_field_y,
+                        incident_field_z=incident_field_z,
+                        two_wave_number=two_wave_number,
+                        roughness_factor_secondary=roughness_factor_secondary,
+                        normalized_correlation_distance=normalized_correlation_distance,
+                        wavelength_m=wavelength_m,
+                        incident_amplitude=incident_amplitude,
+                        taylor_terms=taylor_terms,
+                        taylor_threshold=taylor_threshold,
+                        frequency_hz=simulation_config.frequency_hz,
+                        material_type_codes=material_type_codes,
+                        material_layer_count=material_layer_count,
+                        material_epsilon_r=material_epsilon_r,
+                        material_loss_tangent=material_loss_tangent,
+                        material_mu_r_real=material_mu_r_real,
+                        material_mu_r_imag=material_mu_r_imag,
+                        material_thickness_m=material_thickness_m,
+                    )
+                else:
+                    (
+                        accumulated_fields.theta_component,
+                        accumulated_fields.phi_component,
+                        accumulated_fields.diffuse_theta,
+                        accumulated_fields.diffuse_phi,
+                    ) = rf.accumulate_monostatic_sample_numba(
+                        illumination_flag_mode=geometry_data.illumination_flag_mode,
+                        illumination_flags=illumination_flags,
+                        resistivity_values=resistivity_values,
+                        triangle_areas=triangle_areas,
+                        surface_alpha_cos=cosine_alpha_all,
+                        surface_alpha_sin=sine_alpha_all,
+                        surface_beta_cos=cosine_beta_all,
+                        surface_beta_sin=sine_beta_all,
+                        surface_normal_x=surface_normal_x,
+                        surface_normal_y=surface_normal_y,
+                        surface_normal_z=surface_normal_z,
+                        phase_p_x=phase_p_x,
+                        phase_p_y=phase_p_y,
+                        phase_p_z=phase_p_z,
+                        phase_q_x=phase_q_x,
+                        phase_q_y=phase_q_y,
+                        phase_q_z=phase_q_z,
+                        phase_o_x=phase_o_x,
+                        phase_o_y=phase_o_y,
+                        phase_o_z=phase_o_z,
+                        direction_u=direction_u,
+                        direction_v=direction_v,
+                        direction_w=direction_w,
+                        theta_projection_u=theta_projection_u,
+                        theta_projection_v=theta_projection_v,
+                        theta_projection_w=theta_projection_w,
+                        sine_phi=sine_phi,
+                        cosine_phi=cosine_phi,
+                        incident_field_x=incident_field_x,
+                        incident_field_y=incident_field_y,
+                        incident_field_z=incident_field_z,
+                        two_wave_number=two_wave_number,
+                        roughness_factor_secondary=roughness_factor_secondary,
+                        normalized_correlation_distance=normalized_correlation_distance,
+                        wavelength_m=wavelength_m,
+                        incident_amplitude=incident_amplitude,
+                        taylor_terms=taylor_terms,
+                        taylor_threshold=taylor_threshold,
+                    )
             else:
                 for triangle_index in range(triangle_count):
                     normal_dot_observer = (
