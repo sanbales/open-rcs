@@ -1,0 +1,150 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "open-rcs"
+version = "0.1.0"
+description = "Python toolkit for STL conversion and monostatic/bistatic radar cross section calculation"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "Open RCS Contributors" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering",
+]
+dependencies = [
+    "numpy>=2.1.0",
+    "numpy-stl>=3.1.2",
+    "matplotlib>=3.9.0",
+]
+keywords = [
+    "radar",
+    "rcs",
+    "stl",
+    "electromagnetics",
+    "physical-optics",
+]
+
+[project.urls]
+Homepage = "https://github.com/comp-ime-eb-br/open-rcs"
+Documentation = "https://github.com/comp-ime-eb-br/open-rcs"
+Source = "https://github.com/comp-ime-eb-br/open-rcs"
+Issues = "https://github.com/comp-ime-eb-br/open-rcs/issues"
+
+[project.optional-dependencies]
+dev = [
+    "build",
+    "ipykernel",
+    "isort",
+    "mypy",
+    "pre-commit",
+    "pytest",
+    "ruff",
+    "twine",
+]
+notebook = [
+    "ipywidgets",
+    "plotly",
+]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["open_rcs*"]
+
+# ------------------------
+# Ruff Configuration
+# ------------------------
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["open_rcs"]
+combine-as-imports = true
+force-single-line = false
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+# ------------------------
+# Mypy
+# ------------------------
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_configs = true
+warn_return_any = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+show_error_codes = true
+ignore_missing_imports = true
+
+# ============================================================
+# ==================== PIXI CONFIG ===========================
+# ============================================================
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64", "osx-64", "osx-arm64", "win-64"]
+
+[tool.pixi.dependencies]
+python = "3.11.*"
+numpy = "*"
+numpy-stl = "*"
+matplotlib = "*"
+jupyterlab = "*"
+ipywidgets = "*"
+plotly = "*"
+
+[tool.pixi.pypi-dependencies]
+open-rcs = { path = ".", editable = true }
+
+[tool.pixi.feature.dev.dependencies]
+ipykernel = "*"
+mypy = "*"
+pre-commit = "*"
+pytest = "*"
+python-build = "*"
+ruff = "*"
+twine = "*"
+
+[tool.pixi.environments]
+default = { features = ["notebook"] }
+dev = { features = ["dev", "notebook"] }
+
+# ------------------------
+# Pixi Tasks (DevOps)
+# ------------------------
+
+[tool.pixi.tasks]
+lab = "jupyter lab --no-browser"
+
+[tool.pixi.feature.dev.tasks]
+build = "python -m build"
+bump-patch = "python -c \"from pathlib import Path; import re; p=Path('pyproject.toml'); t=p.read_text(); m=re.search(r'^version\\s*=\\s*\"(\\d+)\\.(\\d+)\\.(\\d+)\"', t, re.M); a,b,c=map(int,m.groups()); nv=f'{a}.{b}.{c+1}'; p.write_text(re.sub(r'^version\\s*=\\s*\"\\d+\\.\\d+\\.\\d+\"', f'version = \\\"{nv}\\\"', t, count=1, flags=re.M)); print(nv)\""
+release = { cmd = "twine upload dist/*", depends-on = ["build"] }
+format = "ruff format ."
+lint = "ruff check . && ruff format --check ."
+fix = "ruff check . --fix && ruff format ."
+typecheck = "mypy src"
+test = "pytest"
+kernel = "python -m ipykernel install --user --name open-rcs --display-name 'Python (open-rcs)'"
+check = { depends-on = ["lint", "typecheck"] }
+pre-commit = { depends-on = ["format", "fix", "check", "test"] }

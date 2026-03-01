@@ -1,20 +1,39 @@
 import numpy as np
+
 from rcs_functions import *
 
 
-def rcs_bistatic(params_entrys:list, coordinatesData:list) -> tuple[str,list,list]:
-    input_model, freq, corr, delstd, ipol, rs, pstart, pstop, delp, tstart, tstop, delt, thetai, phii, matrlpath = params_entrys
-    
+def rcs_bistatic(params_entrys: list, coordinatesData: list) -> tuple[str, list, list]:
+    (
+        input_model,
+        freq,
+        corr,
+        delstd,
+        ipol,
+        rs,
+        pstart,
+        pstop,
+        delp,
+        tstart,
+        tstop,
+        delt,
+        thetai,
+        phii,
+        matrlpath,
+    ) = params_entrys
+
     # processing coordinate data
-    x, y, z, xpts, ypts, zpts, nverts, nfc, node1, node2, node3, iflag, ilum, Rs, ntria, vind, r = coordinatesData
-    
+    x, y, z, xpts, ypts, zpts, nverts, nfc, node1, node2, node3, iflag, ilum, Rs, ntria, vind, r = (
+        coordinatesData
+    )
+
     matrl = []
     if rs == MATERIALESPECIFICO:
         try:
-            matrl = getEntrysFromMatrlFile(ntria,matrlpath)
+            matrl = getEntrysFromMatrlFile(ntria, matrlpath)
         except Exception as e:
-            return e,e,e
-        
+            return e, e, e
+
     wave = 3e8 / freq
     # 2: correlation distance
     corel = float(corr) / wave
@@ -23,8 +42,6 @@ def rcs_bistatic(params_entrys:list, coordinatesData:list) -> tuple[str,list,lis
     # 4: incident wave polarization
     [pol, Et, Ep] = getPolarization(ipol)
     Co = 1  # wave amplitude at all vertices
-
-    
 
     # pattern loop
     (
@@ -47,15 +64,13 @@ def rcs_bistatic(params_entrys:list, coordinatesData:list) -> tuple[str,list,lis
         vvi,
         wwi,
         Ri,
-    ) = bi_calculate_values(
-        pstart, pstop, delp, tstart, tstop, delt, ntria, rad, phii, thetai
-    )
+    ) = bi_calculate_values(pstart, pstop, delp, tstart, tstop, delt, ntria, rad, phii, thetai)
     # get edge vectors and normals from edge cross products
     N, d, Area, beta, alpha = productVector(ntria, N, r, d, Area, alpha, beta, vind)
     phi, theta, U, V, W, e0, Sth, Sph = otherVectorComponents(ip, it)
 
     e0 = bi_incidentFieldCartesian(uui, vvi, wwi, cpi, spi, Et, Ep, e0)
-    
+
     for i1 in range(ip):
         for i2 in range(it):
             phi[i1, i2] = pstart + (i1) * delp
@@ -78,15 +93,13 @@ def rcs_bistatic(params_entrys:list, coordinatesData:list) -> tuple[str,list,lis
                 if iflag == 0:
                     if ((ilum[m] == 1 and nidotk >= 0) or ilum[m] == 0) or iflag == 1:
                         # local direction cosine
-                        ui2, vi2, wi2, T1, T2 = diretionCosines(alpha, beta, D0i, m)
+                        ui2, vi2, wi2, T1, T2 = direction_cosines(alpha, beta, D0i, m)
 
                         # find spherical angles in local coordinates
-                        thi2, phii2, cpi2, spi2, sti2, cti2 = bi_sphericalAngles(
-                            ui2, vi2, wi2
-                        )
+                        thi2, phii2, cpi2, spi2, sti2, cti2 = bi_sphericalAngles(ui2, vi2, wi2)
 
                         # Transform observation quantities
-                        u2, v2, w2, T1, T2 = diretionCosines(alpha, beta, D0, m)
+                        u2, v2, w2, T1, T2 = direction_cosines(alpha, beta, D0, m)
 
                         th2, phi2, cp2, sp2, st2, ct2 = bi_sphericalAngles(u2, v2, w2)
                         # phase at the three vertices of triangle m; biestatic RCS needs "2"
@@ -98,13 +111,13 @@ def rcs_bistatic(params_entrys:list, coordinatesData:list) -> tuple[str,list,lis
                         e2 = np.dot(T2, e1)
 
                         # incident field in local spherical coordinates
-                        Et2, Ep2 = bi_incidentFieldSphericalCoordinates(
-                            cpi2, cti2, sti2, spi2, e2
-                        )
+                        Et2, Ep2 = bi_incidentFieldSphericalCoordinates(cpi2, cti2, sti2, spi2, e2)
 
                         # reflection coefficients (Rs is normalized to eta0)
-                        perp, para = reflectionCoefficients(Rs[m], m, th2, thr, phr, alpha[m], beta[m], freq, matrl)
-                        
+                        perp, para = reflectionCoefficients(
+                            Rs[m], m, th2, thr, phr, alpha[m], beta[m], freq, matrl
+                        )
+
                         # surface current components in local Cartesian coordinates
                         Jx2 = -Et2 * cpi2 * para + Ep2 * spi2 * perp * cti2
                         # cti2 included
@@ -199,9 +212,9 @@ def rcs_bistatic(params_entrys:list, coordinatesData:list) -> tuple[str,list,lis
 
 
 if __name__ == "__main__":
-    param_list = getParamsFromFile('bistatic')
-    if param_list[RESISTIVITY] == 1 and param_list[-1] == 'configure':
+    param_list = getParamsFromFile("bistatic")
+    if param_list[RESISTIVITY] == 1 and param_list[-1] == "configure":
         print("Arquivo de configuração errado")
     else:
         coord_list = extractCoordinatesData(param_list[RESISTIVITY])
-        rcs_bistatic(param_list,coord_list)
+        rcs_bistatic(param_list, coord_list)

@@ -1,6 +1,7 @@
 import sys
 import threading
 
+
 class thread_with_trace(threading.Thread):
     def __init__(self, *args, **keywords):
         threading.Thread.__init__(self, *args, **keywords)
@@ -8,7 +9,7 @@ class thread_with_trace(threading.Thread):
 
     def start(self):
         self.__run_backup = self.run
-        self.run = self.__run	 
+        self.run = self.__run
         threading.Thread.start(self)
 
     def __run(self):
@@ -17,23 +18,25 @@ class thread_with_trace(threading.Thread):
         self.run = self.__run_backup
 
     def globaltrace(self, frame, event, arg):
-        if event == 'call':
+        if event == "call":
             return self.localtrace
         else:
             return None
 
     def localtrace(self, frame, event, arg):
         if self.killed:
-            if event == 'line':
+            if event == "line":
                 raise SystemExit()
             return self.localtrace
-        
+
     def isAlive(self):
         return not self.killed
 
     def kill(self):
         self.killed = True
-'''
+
+
+"""
 def func():
     while True:
         print('thread running')
@@ -44,4 +47,4 @@ time.sleep(2)
 t1.kill()
 t1.join()
 if not t1.isAlive():
-'''
+"""

@@ -1,90 +1,102 @@
+import os
 import subprocess
 import sys
-import os
 import time
 from datetime import datetime
+
 from output_validation import CorrectOutput
-from rcs_monostatic import rcs_monostatic
 from rcs_bistatic import rcs_bistatic
-from rcs_functions import RESISTIVITY, extractCoordinatesData, getParamsFromFile,INPUT_MODEL
+from rcs_functions import INPUT_MODEL, RESISTIVITY, extractCoordinatesData, getParamsFromFile
+from rcs_monostatic import rcs_monostatic
 
 MATLAB_EXECUTABLE_PATH = "C:\\Program Files\\MATLAB\\R2024a\\bin\\matlab.exe"
-AUTOMATOR_INPUT = 'automator_input.txt'
-model = ''
+AUTOMATOR_INPUT = "automator_input.txt"
+model = ""
 
-def update_automator_input(method:str) -> str:
+
+def update_automator_input(method: str) -> str:
     data_hora_atual = datetime.now()
-    formato_desejado = '%Y%m%d%H%M%S'
+    formato_desejado = "%Y%m%d%H%M%S"
     data_hora_formatada = data_hora_atual.strftime(formato_desejado)
 
-    with open(AUTOMATOR_INPUT, 'w') as arquivo:
-        arquivo.write(method+'\n')
+    with open(AUTOMATOR_INPUT, "w") as arquivo:
+        arquivo.write(method + "\n")
         arquivo.write(data_hora_formatada)
-    
+
     return data_hora_formatada
 
-def get_pofacet_file_fullpath(method:str) -> str:
+
+def get_pofacet_file_fullpath(method: str) -> str:
     global model
     start_time = update_automator_input(method)
-    full_path = '../results/POfacets/'+model+'_'+start_time+'.mat'
+    full_path = "../results/POfacets/" + model + "_" + start_time + ".mat"
     return full_path
 
-def wait_file_creation(path:str) -> None:
+
+def wait_file_creation(path: str) -> None:
     isCreate = os.path.exists(path)
     while not isCreate:
         time.sleep(2)
         isCreate = os.path.exists(path)
 
-def set_and_print_model(input_model:str) -> None:
+
+def set_and_print_model(input_model: str) -> None:
     global model
-    model = input_model.split('.')[0]
+    model = input_model.split(".")[0]
     print(f"Modelo analisado: {input_model}\n")
 
 
-def generate_pofacets_file(method:str) -> str:
-    command = [MATLAB_EXECUTABLE_PATH, '-r', f"automatic_simulation_script"]
-    os.chdir('./automator')
+def generate_pofacets_file(method: str) -> str:
+    command = [MATLAB_EXECUTABLE_PATH, "-r", "automatic_simulation_script"]
+    os.chdir("./automator")
 
-    print('>>> Executando Pofacets <<<\n')
+    print(">>> Executando Pofacets <<<\n")
     subprocess.run(command)
 
     pofacets_file = get_pofacet_file_fullpath(method)
 
     wait_file_creation(pofacets_file)
-    print('Concluido.\n')
+    print("Concluido.\n")
 
     return pofacets_file
 
-def run_openrcs_simulation(method:str) -> tuple[str,list,list]:
+
+def run_openrcs_simulation(method: str) -> tuple[str, list, list]:
     param_list = getParamsFromFile(method)
     coord_list = extractCoordinatesData(param_list[RESISTIVITY])
     set_and_print_model(param_list[INPUT_MODEL])
-    
-    print('>>> Executando Open-RCS <<<\n')
-    if method == 'monostatic': return rcs_monostatic(param_list,coord_list)
-    elif method == 'bistatic': return rcs_bistatic(param_list,coord_list)
-    
-def generate_open_rcs_files(method:str) -> str:
-    plot_name, fig_name, file_name = run_openrcs_simulation(method) 
+
+    print(">>> Executando Open-RCS <<<\n")
+    if method == "monostatic":
+        return rcs_monostatic(param_list, coord_list)
+    elif method == "bistatic":
+        return rcs_bistatic(param_list, coord_list)
+
+
+def generate_open_rcs_files(method: str) -> str:
+    plot_name, fig_name, file_name = run_openrcs_simulation(method)
     wait_file_creation(file_name)
-    print('Concluido.\n')
+    print("Concluido.\n")
 
-    return '.'+file_name
+    return "." + file_name
 
-def generate_datum(method:str) -> tuple[str,str]:
-    print('>>>>>>>>>>>>> Iniciando comparação de modelos <<<<<<<<<<<<<\n')
+
+def generate_datum(method: str) -> tuple[str, str]:
+    print(">>>>>>>>>>>>> Iniciando comparação de modelos <<<<<<<<<<<<<\n")
 
     open_rcs_file = generate_open_rcs_files(method)
-    
+
     pofacets_file = generate_pofacets_file(method)
-    
-    return open_rcs_file,pofacets_file
+
+    return open_rcs_file, pofacets_file
+
 
 class InvalidInput(Exception):
-    def __init__(self,message = "Invalid Input"):
+    def __init__(self, message="Invalid Input"):
         self.message = message
         print(self.message)
         super().__init__(self.message)
+
 
 def get_method() -> str:
     params = sys.argv
@@ -92,11 +104,12 @@ def get_method() -> str:
     if len(params) != 2:
         raise InvalidInput("Erro: invalid number of arguments")
     else:
-        if params[1] != 'monostatic' and params[1] != 'bistatic':
+        if params[1] != "monostatic" and params[1] != "bistatic":
             raise InvalidInput(f"Erro: Method '{params[1]}' invalid.")
-        
+
     method = params[1]
     return method
+
 
 def automatic_compare() -> None:
 
@@ -104,7 +117,7 @@ def automatic_compare() -> None:
 
     open_rcs_file, pofacets_file = generate_datum(method)
 
-    print('>>> Calculando erro médio quadrático <<<\n')
+    print(">>> Calculando erro médio quadrático <<<\n")
     pofacetOutput = CorrectOutput(pofacets_file)
     pofacetOutput.setPredictOutputFile(open_rcs_file)
 
@@ -112,10 +125,10 @@ def automatic_compare() -> None:
     pofacetOutput.printMSEBetweenOutputsForColumn("Sph")
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     try:
         automatic_compare()
     except InvalidInput:
-        print('Correct input command: python automatic_compare.py <monostatic|bistatic>')
+        print("Correct input command: python automatic_compare.py <monostatic|bistatic>")
     except Exception as e:
-        print(f'error:{e}')
+        print(f"error:{e}")
