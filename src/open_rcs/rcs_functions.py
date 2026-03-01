@@ -5,8 +5,9 @@ import importlib
 import math
 from collections.abc import Iterable
 from datetime import datetime
+from enum import Enum, IntEnum
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Final, TypeAlias, cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -30,44 +31,93 @@ try:
 except ImportError:  # pragma: no cover - optional material library dependency
     yaml = None
 
-SMALL_SIZE = 8
-MEDIUM_SIZE = 10
-BIGGER_SIZE = 12
-INPUT_MODEL = 0
-FREQUENCY = 1
-STANDART_DEVIATION = 3
-RESISTIVITY = 5
-MATERIAL_SPECIFIC = 1
-TYPE = 0
-THETA = 1
-NTRIA = 14
-DESCRIPTION = 1
-LAYERS = 2
-MATERIAL_TYPE_PEC = "PEC"
-MATERIAL_TYPE_COMPOSITE = "Composite"
-MATERIAL_TYPE_COMPOSITE_ON_PEC = "Composite Layer on PEC"
-MATERIAL_TYPE_MULTI_LAYER = "Multiple Layers"
-MATERIAL_TYPE_MULTI_LAYER_ON_PEC = "Multiple Layers on PEC"
-MATERIAL_CODE_PEC = 0
-MATERIAL_CODE_COMPOSITE = 1
-MATERIAL_CODE_COMPOSITE_ON_PEC = 2
-MATERIAL_CODE_MULTI_LAYER = 3
-MATERIAL_CODE_MULTI_LAYER_ON_PEC = 4
-MATERIAL_TYPE_TO_CODE: dict[str, int] = {
-    MATERIAL_TYPE_PEC: MATERIAL_CODE_PEC,
-    MATERIAL_TYPE_COMPOSITE: MATERIAL_CODE_COMPOSITE,
-    MATERIAL_TYPE_COMPOSITE_ON_PEC: MATERIAL_CODE_COMPOSITE_ON_PEC,
-    MATERIAL_TYPE_MULTI_LAYER: MATERIAL_CODE_MULTI_LAYER,
-    MATERIAL_TYPE_MULTI_LAYER_ON_PEC: MATERIAL_CODE_MULTI_LAYER_ON_PEC,
+
+class FontSize(IntEnum):
+    SMALL = 8
+    MEDIUM = 10
+    LARGE = 12
+
+
+class LegacyInputIndex(IntEnum):
+    INPUT_MODEL = 0
+    FREQUENCY_GHZ = 1
+    RESISTIVITY_MODE = 5
+    PHI_START = 6
+    PHI_STOP = 7
+    PHI_STEP = 8
+    THETA_START = 9
+    THETA_STOP = 10
+    THETA_STEP = 11
+    INCIDENT_THETA = 12
+    INCIDENT_PHI = 13
+
+
+class SphericalIndex(IntEnum):
+    THETA = 1
+
+
+class MaterialEntryIndex(IntEnum):
+    TYPE = 0
+    DESCRIPTION = 1
+    FIRST_LAYER = 2
+
+
+class MaterialType(str, Enum):
+    PEC = "PEC"
+    COMPOSITE = "Composite"
+    COMPOSITE_ON_PEC = "Composite Layer on PEC"
+    MULTI_LAYER = "Multiple Layers"
+    MULTI_LAYER_ON_PEC = "Multiple Layers on PEC"
+
+
+class MaterialCode(IntEnum):
+    PEC = 0
+    COMPOSITE = 1
+    COMPOSITE_ON_PEC = 2
+    MULTI_LAYER = 3
+    MULTI_LAYER_ON_PEC = 4
+
+
+MATERIAL_SPECIFIC: Final[float] = 1.0
+MATERIAL_TYPE_TO_CODE: Final[dict[str, int]] = {
+    MaterialType.PEC.value: int(MaterialCode.PEC),
+    MaterialType.COMPOSITE.value: int(MaterialCode.COMPOSITE),
+    MaterialType.COMPOSITE_ON_PEC.value: int(MaterialCode.COMPOSITE_ON_PEC),
+    MaterialType.MULTI_LAYER.value: int(MaterialCode.MULTI_LAYER),
+    MaterialType.MULTI_LAYER_ON_PEC.value: int(MaterialCode.MULTI_LAYER_ON_PEC),
 }
-RESULTS_DIR = Path("./results")
-NUMBA_AVAILABLE = njit is not None
-MaterialLayer = list[float]
-MaterialEntry = list[str | MaterialLayer]
-MaterialTable = list[MaterialEntry]
-MaterialCatalog = dict[str, MaterialEntry]
+RESULTS_DIR: Final[Path] = Path("./results")
+NUMBA_AVAILABLE: Final[bool] = njit is not None
+MaterialLayer: TypeAlias = list[float]
+MaterialEntry: TypeAlias = list[str | MaterialLayer]
+MaterialTable: TypeAlias = list[MaterialEntry]
+MaterialCatalog: TypeAlias = dict[str, MaterialEntry]
 _NUMBA_PLACEHOLDER_INT_ARRAY = np.zeros(1, dtype=np.int32)
 _NUMBA_PLACEHOLDER_FLOAT_ARRAY = np.zeros((1, 1), dtype=np.float64)
+
+# Backward-compatible aliases used by tests and older call sites.
+SMALL_SIZE: Final[int] = int(FontSize.SMALL)
+MEDIUM_SIZE: Final[int] = int(FontSize.MEDIUM)
+BIGGER_SIZE: Final[int] = int(FontSize.LARGE)
+INPUT_MODEL: Final[int] = int(LegacyInputIndex.INPUT_MODEL)
+FREQUENCY: Final[int] = int(LegacyInputIndex.FREQUENCY_GHZ)
+STANDART_DEVIATION: Final[int] = 3
+RESISTIVITY: Final[int] = int(LegacyInputIndex.RESISTIVITY_MODE)
+TYPE: Final[int] = int(MaterialEntryIndex.TYPE)
+THETA: Final[int] = int(SphericalIndex.THETA)
+NTRIA: Final[int] = 14
+DESCRIPTION: Final[int] = int(MaterialEntryIndex.DESCRIPTION)
+LAYERS: Final[int] = int(MaterialEntryIndex.FIRST_LAYER)
+MATERIAL_TYPE_PEC: Final[str] = MaterialType.PEC.value
+MATERIAL_TYPE_COMPOSITE: Final[str] = MaterialType.COMPOSITE.value
+MATERIAL_TYPE_COMPOSITE_ON_PEC: Final[str] = MaterialType.COMPOSITE_ON_PEC.value
+MATERIAL_TYPE_MULTI_LAYER: Final[str] = MaterialType.MULTI_LAYER.value
+MATERIAL_TYPE_MULTI_LAYER_ON_PEC: Final[str] = MaterialType.MULTI_LAYER_ON_PEC.value
+MATERIAL_CODE_PEC: Final[int] = int(MaterialCode.PEC)
+MATERIAL_CODE_COMPOSITE: Final[int] = int(MaterialCode.COMPOSITE)
+MATERIAL_CODE_COMPOSITE_ON_PEC: Final[int] = int(MaterialCode.COMPOSITE_ON_PEC)
+MATERIAL_CODE_MULTI_LAYER: Final[int] = int(MaterialCode.MULTI_LAYER)
+MATERIAL_CODE_MULTI_LAYER_ON_PEC: Final[int] = int(MaterialCode.MULTI_LAYER_ON_PEC)
 
 
 def get_polarization(incident_polarization: int) -> tuple[str, complex, complex]:
@@ -84,7 +134,9 @@ def compile_material_lookup_arrays(
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Convert heterogeneous material entries into dense numeric arrays for fast kernels."""
     facet_count = len(material_table)
-    max_layers = max((len(entry) - LAYERS for entry in material_table), default=0)
+    max_layers = max(
+        (len(entry) - MaterialEntryIndex.FIRST_LAYER for entry in material_table), default=0
+    )
     max_layers = max(1, max_layers)
 
     material_type_codes = np.zeros(facet_count, dtype=np.int32)
@@ -96,12 +148,12 @@ def compile_material_lookup_arrays(
     thickness_m = np.zeros((facet_count, max_layers), dtype=np.float64)
 
     for facet_index, entry in enumerate(material_table):
-        material_type = str(entry[TYPE])
+        material_type = str(entry[MaterialEntryIndex.TYPE])
         if material_type not in MATERIAL_TYPE_TO_CODE:
             raise ValueError(f"Unsupported material type: {material_type}")
         material_type_codes[facet_index] = MATERIAL_TYPE_TO_CODE[material_type]
 
-        layers = cast(list[list[float]], entry[LAYERS:])
+        layers = cast(list[list[float]], entry[MaterialEntryIndex.FIRST_LAYER :])
         material_layer_count[facet_index] = len(layers)
         for layer_index, layer in enumerate(layers):
             if layer_index >= max_layers:
@@ -138,13 +190,13 @@ def get_standard_deviation(
 
 
 def set_font_option(
-    font_size: int = SMALL_SIZE,
-    axes_title: int = MEDIUM_SIZE,
-    axes_label: int = SMALL_SIZE,
-    xtick_label: int = SMALL_SIZE,
-    ytick_label: int = SMALL_SIZE,
-    legend_size: int = SMALL_SIZE,
-    figure_title: int = BIGGER_SIZE,
+    font_size: int = int(FontSize.SMALL),
+    axes_title: int = int(FontSize.MEDIUM),
+    axes_label: int = int(FontSize.SMALL),
+    xtick_label: int = int(FontSize.SMALL),
+    ytick_label: int = int(FontSize.SMALL),
+    legend_size: int = int(FontSize.SMALL),
+    figure_title: int = int(FontSize.LARGE),
 ) -> None:
     """Configure global matplotlib font sizes."""
     plt.rc("font", size=font_size)
@@ -246,10 +298,12 @@ def get_params_from_file(  # pragma: no cover
             if row and not row.startswith("#"):
                 param_list.append(_parse_param(row))
 
-    param_list[FREQUENCY] = float(param_list[FREQUENCY]) * 1e9
-    convert_stl(Path("./stl_models") / str(param_list[INPUT_MODEL]))
+    param_list[LegacyInputIndex.FREQUENCY_GHZ] = (
+        float(param_list[LegacyInputIndex.FREQUENCY_GHZ]) * 1e9
+    )
+    convert_stl(Path("./stl_models") / str(param_list[LegacyInputIndex.INPUT_MODEL]))
 
-    if int(param_list[RESISTIVITY]) != MATERIAL_SPECIFIC:
+    if int(param_list[LegacyInputIndex.RESISTIVITY_MODE]) != MATERIAL_SPECIFIC:
         param_list[-1] = "matrl.txt"
 
     angle_sweep = AngleSweep(
@@ -261,14 +315,14 @@ def get_params_from_file(  # pragma: no cover
         theta_step_deg=float(param_list[11]),
     )
     material = MaterialConfig(
-        resistivity_mode=int(param_list[RESISTIVITY]),
+        resistivity_mode=int(param_list[LegacyInputIndex.RESISTIVITY_MODE]),
         material_path=str(param_list[-1]),
     )
 
     if method == "monostatic":
         return MonostaticSimulationConfig(
-            input_model=str(param_list[INPUT_MODEL]),
-            frequency_hz=float(param_list[FREQUENCY]),
+            input_model=str(param_list[LegacyInputIndex.INPUT_MODEL]),
+            frequency_hz=float(param_list[LegacyInputIndex.FREQUENCY_GHZ]),
             correlation_distance_m=float(param_list[2]),
             standard_deviation_m=float(param_list[3]),
             incident_polarization=int(param_list[4]),
@@ -277,8 +331,8 @@ def get_params_from_file(  # pragma: no cover
         )
     if method == "bistatic":
         return BistaticSimulationConfig(
-            input_model=str(param_list[INPUT_MODEL]),
-            frequency_hz=float(param_list[FREQUENCY]),
+            input_model=str(param_list[LegacyInputIndex.INPUT_MODEL]),
+            frequency_hz=float(param_list[LegacyInputIndex.FREQUENCY_GHZ]),
             correlation_distance_m=float(param_list[2]),
             standard_deviation_m=float(param_list[3]),
             incident_polarization=int(param_list[4]),
@@ -738,16 +792,16 @@ def taylor_g(n, w):
 def _canonical_material_type(material_type: str) -> str:
     normalized_type = material_type.strip().lower()
     aliases = {
-        "pec": MATERIAL_TYPE_PEC,
-        "composite": MATERIAL_TYPE_COMPOSITE,
-        "composite layer on pec": MATERIAL_TYPE_COMPOSITE_ON_PEC,
-        "multiple layers": MATERIAL_TYPE_MULTI_LAYER,
-        "multiple layers on pec": MATERIAL_TYPE_MULTI_LAYER_ON_PEC,
+        "pec": MaterialType.PEC.value,
+        "composite": MaterialType.COMPOSITE.value,
+        "composite layer on pec": MaterialType.COMPOSITE_ON_PEC.value,
+        "multiple layers": MaterialType.MULTI_LAYER.value,
+        "multiple layers on pec": MaterialType.MULTI_LAYER_ON_PEC.value,
         # Legacy aliases accepted for smoother migration.
-        "composito": MATERIAL_TYPE_COMPOSITE,
-        "camada de composito em pec": MATERIAL_TYPE_COMPOSITE_ON_PEC,
-        "multiplas camadas": MATERIAL_TYPE_MULTI_LAYER,
-        "multiplas camadas em pec": MATERIAL_TYPE_MULTI_LAYER_ON_PEC,
+        "composito": MaterialType.COMPOSITE.value,
+        "camada de composito em pec": MaterialType.COMPOSITE_ON_PEC.value,
+        "multiplas camadas": MaterialType.MULTI_LAYER.value,
+        "multiplas camadas em pec": MaterialType.MULTI_LAYER_ON_PEC.value,
     }
     if normalized_type not in aliases:
         raise ValueError(f"Unsupported material type: {material_type}")
@@ -783,8 +837,11 @@ def _parse_material_layer(layer_data: Any, context: str) -> MaterialLayer:
 
 
 def _clone_material_entry(material_entry: MaterialEntry) -> MaterialEntry:
-    cloned_entry: MaterialEntry = [str(material_entry[TYPE]), str(material_entry[DESCRIPTION])]
-    for layer in material_entry[LAYERS:]:
+    cloned_entry: MaterialEntry = [
+        str(material_entry[MaterialEntryIndex.TYPE]),
+        str(material_entry[MaterialEntryIndex.DESCRIPTION]),
+    ]
+    for layer in material_entry[MaterialEntryIndex.FIRST_LAYER :]:
         cloned_entry.append(list(cast(MaterialLayer, layer)))
     return cloned_entry
 
@@ -804,7 +861,7 @@ def _material_entry_from_yaml(
         raise ValueError(f"materials[{index}]: 'layers' must be a list.")
 
     material_entry: MaterialEntry = [material_type, description]
-    if material_type != MATERIAL_TYPE_PEC and not layers_raw:
+    if material_type != MaterialType.PEC.value and not layers_raw:
         raise ValueError(f"materials[{index}] ({material_id}) requires at least one layer.")
     for layer_index, layer_data in enumerate(layers_raw):
         context = f"materials[{index}].layers[{layer_index}]"
@@ -1030,9 +1087,11 @@ def _load_material_table_from_yaml(material_path: str | Path, ntria: int) -> Mat
 def save_list_in_file(material_rows: list, output_file: str) -> None:
     serialized_rows = []
     for row in material_rows:
-        entry_str = str(row[TYPE]) + "," + str(row[DESCRIPTION])
+        entry_str = (
+            str(row[MaterialEntryIndex.TYPE]) + "," + str(row[MaterialEntryIndex.DESCRIPTION])
+        )
 
-        for layer in row[LAYERS:]:
+        for layer in row[MaterialEntryIndex.FIRST_LAYER :]:
             for i in range(len(layer)):
                 entry_str = entry_str + "," + str(layer[i])
 
@@ -1074,12 +1133,12 @@ def convert_material_textlist_to_list(text_rows: Iterable[str]) -> MaterialTable
         if len(entries) < 2:
             continue
         formatted_entries: MaterialEntry = [
-            _canonical_material_type(entries[TYPE]),
-            entries[DESCRIPTION],
+            _canonical_material_type(entries[MaterialEntryIndex.TYPE]),
+            entries[MaterialEntryIndex.DESCRIPTION],
         ]
         layer_values: MaterialLayer = []
 
-        for index, entry in enumerate(entries[LAYERS:]):
+        for index, entry in enumerate(entries[MaterialEntryIndex.FIRST_LAYER :]):
             layer_values.append(float(entry))
             if (index + 1) % 5 == 0:
                 formatted_entries.append(layer_values)
@@ -1143,7 +1202,7 @@ def _resolve_local_incidence_theta(
         np.array([1.0, thri, phrii], dtype=float),
         transform_global_to_local,
     )
-    return float(spherical_vector[THETA])
+    return float(spherical_vector[SphericalIndex.THETA])
 
 
 def _mat2_mul(
@@ -1232,7 +1291,7 @@ def refl_coeff_composite(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
-    layer = cast(list[float], matrlLine[LAYERS])
+    layer = cast(list[float], matrlLine[MaterialEntryIndex.FIRST_LAYER])
     local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
 
     epsilon_complex, mu_complex, thickness_m = _layer_properties(layer)
@@ -1299,7 +1358,7 @@ def refl_coeff_composite_layer_on_pec(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
-    layers = cast(list[list[float]], matrlLine[LAYERS:])
+    layers = cast(list[list[float]], matrlLine[MaterialEntryIndex.FIRST_LAYER :])
     local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
     sine_incidence = math.sin(local_incidence_theta)
     cosine_incidence = math.cos(local_incidence_theta)
@@ -1379,7 +1438,7 @@ def refl_coeff_multi_layers(
     matrlLine: list,
     local_theta: float | None = None,
 ) -> tuple[complex, complex]:
-    layers = cast(list[list[float]], matrlLine[LAYERS:])
+    layers = cast(list[list[float]], matrlLine[MaterialEntryIndex.FIRST_LAYER :])
     local_incidence_theta = _resolve_local_incidence_theta(thri, phrii, alpha, beta, local_theta)
 
     m00p, m01p, m10p, m11p = 1.0 + 0j, 0.0 + 0j, 0.0 + 0j, 1.0 + 0j
@@ -1491,11 +1550,11 @@ def get_reflection_coeff_from_material(
     reflection_perpendicular: complex = 0.0 + 0.0j
     reflection_parallel: complex = 0.0 + 0.0j
 
-    if matrlLine[TYPE] == MATERIAL_TYPE_PEC:
+    if matrlLine[MaterialEntryIndex.TYPE] == MaterialType.PEC.value:
         reflection_perpendicular = -1.0 + 0.0j
         reflection_parallel = -1.0 + 0.0j
 
-    elif matrlLine[TYPE] == MATERIAL_TYPE_COMPOSITE:
+    elif matrlLine[MaterialEntryIndex.TYPE] == MaterialType.COMPOSITE.value:
         reflection_perpendicular, reflection_parallel = refl_coeff_composite(
             thri,
             phrii,
@@ -1506,7 +1565,7 @@ def get_reflection_coeff_from_material(
             local_theta=local_theta,
         )
 
-    elif matrlLine[TYPE] == MATERIAL_TYPE_COMPOSITE_ON_PEC:
+    elif matrlLine[MaterialEntryIndex.TYPE] == MaterialType.COMPOSITE_ON_PEC.value:
         reflection_perpendicular, reflection_parallel = refl_coeff_composite_layer_on_pec(
             thri,
             phrii,
@@ -1517,7 +1576,7 @@ def get_reflection_coeff_from_material(
             local_theta=local_theta,
         )
 
-    elif matrlLine[TYPE] == MATERIAL_TYPE_MULTI_LAYER:
+    elif matrlLine[MaterialEntryIndex.TYPE] == MaterialType.MULTI_LAYER.value:
         reflection_perpendicular, reflection_parallel = refl_coeff_multi_layers(
             thri,
             phrii,
@@ -1528,7 +1587,7 @@ def get_reflection_coeff_from_material(
             local_theta=local_theta,
         )
 
-    elif matrlLine[TYPE] == MATERIAL_TYPE_MULTI_LAYER_ON_PEC:
+    elif matrlLine[MaterialEntryIndex.TYPE] == MaterialType.MULTI_LAYER_ON_PEC.value:
         reflection_perpendicular, reflection_parallel = refl_coeff_multi_layers_on_pec(
             thri,
             phrii,
@@ -1539,7 +1598,7 @@ def get_reflection_coeff_from_material(
             local_theta=local_theta,
         )
     else:
-        material_type = str(matrlLine[TYPE])
+        material_type = str(matrlLine[MaterialEntryIndex.TYPE])
         raise ValueError(f"Unsupported material type: {material_type}")
 
     return reflection_perpendicular, reflection_parallel
@@ -2045,7 +2104,10 @@ if NUMBA_AVAILABLE:
         previous_z_parallel = 0.0 + 0.0j
         previous_z_perpendicular = 0.0 + 0.0j
 
-        if material_code in (MATERIAL_CODE_COMPOSITE_ON_PEC, MATERIAL_CODE_MULTI_LAYER_ON_PEC):
+        if material_code in (
+            MATERIAL_CODE_COMPOSITE_ON_PEC,
+            MATERIAL_CODE_MULTI_LAYER_ON_PEC,
+        ):
             for layer_index in range(layer_count):
                 eps = epsilon_r[triangle_index, layer_index]
                 loss = loss_tangent[triangle_index, layer_index]
