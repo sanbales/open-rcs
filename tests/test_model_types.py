@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from open_rcs.model_types import RadarBand
+from open_rcs.constants import RadarBand
 
 
 def test_radar_band_properties_and_string_list() -> None:

@@ -26,7 +26,7 @@ def simulate_bistatic(
 ) -> RcsComputationResult:
     """Run bistatic simulation and return in-memory arrays (no disk output)."""
     material_entries: list = []
-    use_material_lookup = simulation_config.material.resistivity_mode == rf.MATERIAL_SPECIFIC
+    use_material_lookup = simulation_config.material.resistivity_mode == rf.SPECIFIC_MATERIAL
     material_type_codes = np.zeros(1, dtype=np.int32)
     material_layer_count = np.zeros(1, dtype=np.int32)
     material_epsilon_r = np.zeros((1, 1), dtype=np.float64)

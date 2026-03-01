@@ -10,6 +10,7 @@ import numpy as np
 from stl import mesh
 
 from . import rcs_functions as rf
+from .constants import RadarBand
 from .guidance import estimate_roughness_correlation_guidance
 from .model_types import (
     AngleSweep,
@@ -17,7 +18,6 @@ from .model_types import (
     GeometryData,
     MaterialConfig,
     MonostaticSimulationConfig,
-    RadarBand,
     RcsComputationResult,
 )
 from .rcs_bistatic import simulate_bistatic
@@ -898,7 +898,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
             )
             use_material_file = bool(use_material_file_widget.value) and bool(material_options)
             material = MaterialConfig(
-                resistivity_mode=float(rf.MATERIAL_SPECIFIC if use_material_file else 0),
+                resistivity_mode=float(rf.SPECIFIC_MATERIAL if use_material_file else 0),
                 material_path=str(
                     material_file_widget.value
                     if use_material_file

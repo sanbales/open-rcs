@@ -3,43 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 
 import numpy as np
-
-
-class RadarBand(Enum):
-    """IEEE Standard Letter Designations for Radar-Frequency Bands (GHz)."""
-
-    HF = (0.003, 0.03)
-    VHF = (0.03, 0.3)
-    UHF = (0.3, 1.0)
-    L = (1.0, 2.0)
-    S = (2.0, 4.0)
-    C = (4.0, 8.0)
-    X = (8.0, 12.0)
-    KU = (12.0, 18.0)
-    K = (18.0, 27.0)
-    KA = (27.0, 40.0)
-    V = (40.0, 75.0)
-    W = (75.0, 110.0)
-
-    @property
-    def min_freq(self) -> float:
-        return self.value[0]
-
-    @property
-    def center_freq(self) -> float:
-        return 0.5 * sum(self.value)
-
-    @property
-    def max_freq(self) -> float:
-        return self.value[1]
-
-    @classmethod
-    def to_string_list(cls) -> list[str]:
-        """Returns a list of strings formatted as 'NAME: MIN-MAX GHz'."""
-        return [f"{band.name}: {band.value[0]}-{band.value[1]} GHz" for band in cls]
 
 
 @dataclass(slots=True)

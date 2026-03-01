@@ -22,7 +22,7 @@ def test_material_roundtrip_and_pec_reflection() -> None:
     assert table[1][first_layer_index] == [2.0, 1.0, 0.01, 0.02, 0.03]
 
     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
-        rs=float(rf.MATERIAL_SPECIFIC),
+        rs=float(rf.SPECIFIC_MATERIAL),
         index=0,
         th2=0.1,
         thri=0.2,

@@ -7,7 +7,7 @@ from .model_types import (
     MaterialConfig,
     MonostaticSimulationConfig,
 )
-from .rcs_functions import MATERIAL_SPECIFIC
+from .rcs_functions import SPECIFIC_MATERIAL
 from .stl_module import convert_stl
 
 
@@ -50,7 +50,7 @@ def get_params_from_file(  # pragma: no cover
     )
     convert_stl(Path("./stl_models") / str(param_list[LegacyInputIndex.INPUT_MODEL]))
 
-    if int(param_list[LegacyInputIndex.RESISTIVITY_MODE]) != MATERIAL_SPECIFIC:
+    if int(param_list[LegacyInputIndex.RESISTIVITY_MODE]) != SPECIFIC_MATERIAL:
         param_list[-1] = "matrl.txt"
 
     angle_sweep = AngleSweep(
