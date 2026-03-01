@@ -298,7 +298,7 @@ def simulate_monostatic(
 
                     local_theta_angle = math.asin(local_sine_theta)
                     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
-                        int(resistivity_values[triangle_index]),
+                        float(resistivity_values[triangle_index]),
                         triangle_index,
                         local_theta_angle,
                         theta_radians,

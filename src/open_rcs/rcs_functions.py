@@ -1161,7 +1161,7 @@ def get_reflection_coeff_from_material(
 
 
 def reflection_coefficients(
-    rs: int,
+    rs: float,
     index: int,
     th2: float,
     thri: float,
@@ -1301,7 +1301,6 @@ def final_plot(
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     plot_name = str(RESULTS_DIR / f"temp_{timestamp}.png")
     plt.savefig(plot_name)
-    # plt.show()
     plt.close()
     return plot_name
 

@@ -338,7 +338,7 @@ def simulate_bistatic(
                     )
 
                     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
-                        int(resistivity_values[triangle_index]),
+                        float(resistivity_values[triangle_index]),
                         triangle_index,
                         observation_local_theta,
                         theta_radians,
