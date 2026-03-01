@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import cmath
 import math
+from collections.abc import Iterable
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -37,6 +39,9 @@ DESCRIPTION = 1
 LAYERS = 2
 RESULTS_DIR = Path("./results")
 NUMBA_AVAILABLE = njit is not None
+MaterialLayer = list[float]
+MaterialEntry = list[str | MaterialLayer]
+MaterialTable = list[MaterialEntry]
 
 
 def get_polarization(incident_polarization: int) -> tuple[str, complex, complex]:
@@ -304,10 +309,6 @@ def plot_triangle_model(
             yav = (ypts[node1[i] - 1] + ypts[node2[i] - 1] + ypts[node3[i] - 1]) / 3
             zav = (zpts[node1[i] - 1] + zpts[node2[i] - 1] + zpts[node3[i] - 1]) / 3
             ax.text(xav, yav, zav, str(nfc[i]))
-    # return xmin, ymin, zmin, xmax, ymax, zmax
-
-    # plot parameters
-    # param = plot_parameters("Monostatic",freq,wave,corr,delstd, pol,ntria,pstart,pstop,delp,tstart,tstop,delt)
 
     # save plots
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -481,16 +482,14 @@ def bi_calculate_values(pstart, pstop, delp, tstart, tstop, delt, ntria, rad, fi
 
     ip = calculate_ip()
     it = calculate_it()
-    phr0 = calculate_phr0()
-    thr0 = calculate_thr0()
 
-    Area = np.empty(ntria, np.double)
+    area = np.empty(ntria, np.double)
     alpha = np.empty(ntria, np.double)
     beta = np.empty(ntria, np.double)
     N = np.empty([ntria, 3], np.double)
     d = np.empty([ntria, 3], np.double)
 
-    return Area, alpha, beta, N, d, ip, it, cpi, spi, sti, cti, ui, vi, wi, D0i, uui, vvi, wwi, Ri
+    return area, alpha, beta, N, d, ip, it, cpi, spi, sti, cti, ui, vi, wi, D0i, uui, vvi, wwi, Ri
 
 
 def global_angles(
@@ -747,7 +746,7 @@ def save_list_in_file(especific_list: list, especific_file: str) -> None:
             file.write(row + "\n")
 
 
-def get_entries_from_material_file(ntria: int, matrlpath: str) -> list:
+def get_entries_from_material_file(ntria: int, matrlpath: str) -> MaterialTable:
     try:
         with open(matrlpath) as file:
             matrl = get_material_properties_from_file(file)
@@ -760,29 +759,26 @@ def get_entries_from_material_file(ntria: int, matrlpath: str) -> list:
     return matrl
 
 
-def get_material_properties_from_file(filename) -> list:
-    material_text_list = []
-    for row in filename:
-        material_text_list.append(row)
-    return convert_material_textlist_to_list(material_text_list)
+def get_material_properties_from_file(rows: Iterable[str]) -> MaterialTable:
+    material_text_rows = list(rows)
+    return convert_material_textlist_to_list(material_text_rows)
 
 
-def convert_material_textlist_to_list(text_list: str) -> list:
-    matrl = []
-    for row in text_list:
-        entrys = row.strip("\n")
-        entrys = entrys.split(",")
-        formatedEntrys = [entrys[TYPE], entrys[DESCRIPTION]]
-        layer = []
+def convert_material_textlist_to_list(text_rows: Iterable[str]) -> MaterialTable:
+    material_table: MaterialTable = []
+    for row in text_rows:
+        entries = row.strip("\n").split(",")
+        formatted_entries: MaterialEntry = [entries[TYPE], entries[DESCRIPTION]]
+        layer_values: MaterialLayer = []
 
-        for index, entry in enumerate(entrys[LAYERS:]):
-            layer.append(float(entry))
+        for index, entry in enumerate(entries[LAYERS:]):
+            layer_values.append(float(entry))
             if (index + 1) % 5 == 0:
-                formatedEntrys.append(layer)
-                layer = []
+                formatted_entries.append(layer_values)
+                layer_values = []
 
-        matrl.append(formatedEntrys)
-    return matrl
+        material_table.append(formatted_entries)
+    return material_table
 
 
 def erase_widges_from_table(table_frame):
@@ -843,25 +839,25 @@ def refl_coeff(er1, mr1, er2, mr2, thetai):
     return gammapar, gammaperp, thetat, TIR
 
 
-def spher2cart(sphericalVector: np.array) -> np.array:
-    R = sphericalVector[0]
-    theta = sphericalVector[1]
-    phi = sphericalVector[2]
-    x = R * np.sin(theta) * np.cos(phi)
-    y = R * np.sin(theta) * np.sin(phi)
-    z = R * np.cos(theta)
+def spher2cart(spherical_vector: np.ndarray) -> np.ndarray:
+    radius = float(spherical_vector[0])
+    theta = float(spherical_vector[1])
+    phi = float(spherical_vector[2])
+    x = radius * np.sin(theta) * np.cos(phi)
+    y = radius * np.sin(theta) * np.sin(phi)
+    z = radius * np.cos(theta)
 
     return np.array([x, y, z])
 
 
-def cart2spher(cartVector: np.array) -> np.array:
-    x = cartVector[0]
-    y = cartVector[1]
-    z = cartVector[2]
-    R = np.sqrt(x**2 + y**2 + z**2)
+def cart2spher(cart_vector: np.ndarray) -> np.ndarray:
+    x = float(cart_vector[0])
+    y = float(cart_vector[1])
+    z = float(cart_vector[2])
+    radius = np.sqrt(x**2 + y**2 + z**2)
     theta = math.atan2(np.sqrt(x**2 + y**2), z)
     phi = math.atan2(y, x)
-    return np.array([R, theta, phi])
+    return np.array([radius, theta, phi], dtype=float)
 
 
 def spherical_global_to_local(
@@ -1008,10 +1004,10 @@ def refl_coeff_multi_layers(
     Mpar = np.eye(2)
     Mperp = np.eye(2)
 
-    er = []
-    mr = []
-    t = []
-    thetat = []
+    er: list[complex] = []
+    mr: list[complex] = []
+    t: list[float] = []
+    thetat: list[complex] = []
 
     for i, layer in enumerate(layers):
         er.append(layer[0] - 1j * layer[1] * layer[0])
@@ -1070,8 +1066,6 @@ def refl_coeff_multi_layers_on_pec(
     T21 = rotation_transform_matrix(alpha, beta)
     sphericalVector = spherical_global_to_local(np.array([1, thri, phrii]), T21)
     layers = matrlLine[LAYERS:]
-    Mpar = np.eye(2)
-    Mperp = np.eye(2)
     WMatrix_par = np.eye(2)
     WMatrix_perp = np.eye(2)
 
@@ -1144,8 +1138,8 @@ def refl_coeff_multi_layers_on_pec(
 def get_reflection_coeff_from_material(
     thri: float, phrii: float, alpha: float, beta: float, freq: float, matrlLine: list
 ) -> tuple[float, float]:
-    RCperp = 0
-    RCpar = 0
+    RCperp: float = 0.0
+    RCpar: float = 0.0
 
     if matrlLine[TYPE] == "PEC":
         RCperp = -1
@@ -1178,8 +1172,8 @@ def reflection_coefficients(
     matrl: list,
     local_cos_theta: float | None = None,
 ) -> tuple[float, float]:
-    perp = 0
-    para = 0
+    perp: float = 0.0
+    para: float = 0.0
 
     if rs == MATERIALESPECIFICO:
         perp, para = get_reflection_coeff_from_material(
@@ -1236,7 +1230,14 @@ def final_plot(
         )
         plt.xlabel(f"{mode} Angle, theta (deg)")
         plt.ylabel("RCS (dBsm)")
-        plt.axis([np.min(theta_grid_deg), np.max(theta_grid_deg), rcs_min_db, rcs_max_db])
+        plt.axis(
+            (
+                float(np.min(theta_grid_deg)),
+                float(np.max(theta_grid_deg)),
+                float(rcs_min_db),
+                float(rcs_max_db),
+            )
+        )
         plt.plot(theta_grid_deg[0], rcs_theta_db[0])
         plt.plot(theta_grid_deg[0], rcs_phi_db[0], linewidth=2, linestyle="dashed")
         plt.grid(True)
@@ -1250,7 +1251,14 @@ def final_plot(
         )
         plt.xlabel(f"{mode} Angle, phi (deg)")
         plt.ylabel("RCS (dBsm)")
-        plt.axis([np.min(phi_grid_deg), np.max(phi_grid_deg), rcs_min_db, rcs_max_db])
+        plt.axis(
+            (
+                float(np.min(phi_grid_deg)),
+                float(np.max(phi_grid_deg)),
+                float(rcs_min_db),
+                float(rcs_max_db),
+            )
+        )
         plt.plot(phi_grid_deg, rcs_theta_db)
         plt.plot(phi_grid_deg, rcs_phi_db, linewidth=2, linestyle="dashed")
         plt.grid(True)
@@ -1338,7 +1346,7 @@ def calculate_ic(
     triangle_area: float,
     incident_amplitude: float,
     taylor_threshold: float,
-):
+) -> complex:
     area_scale = 2.0 * triangle_area
     phase_difference = phase_q - phase_p
     abs_phase_p = abs(phase_p)
@@ -1348,7 +1356,7 @@ def calculate_ic(
     # special case 1
     if abs_phase_p < taylor_threshold and abs_phase_q >= taylor_threshold:
         exp_phase_q = cmath.exp(1j * phase_q)
-        series_integral = 0.0
+        series_integral: complex = 0.0 + 0.0j
         for n in range(taylor_terms + 1):
             series_integral = series_integral + (1j * phase_p) ** n / math.factorial(n) * (
                 -incident_amplitude / (n + 1)
@@ -1357,7 +1365,7 @@ def calculate_ic(
         area_integral_value = series_integral * area_scale * exp_phase_origin / (1j * phase_q)
     # special case 2
     elif abs_phase_p < taylor_threshold and abs_phase_q < taylor_threshold:
-        series_integral = 0.0
+        series_integral = 0.0 + 0.0j
         for n in range(taylor_terms + 1):
             for nn in range(taylor_terms):
                 series_integral = (
@@ -1371,7 +1379,7 @@ def calculate_ic(
     # special case 3
     elif abs_phase_p >= taylor_threshold and abs_phase_q < taylor_threshold:
         exp_phase_p = cmath.exp(1j * phase_p)
-        series_integral = 0.0
+        series_integral = 0.0 + 0.0j
         for n in range(taylor_terms + 1):
             series_integral = series_integral + (1j * phase_q) ** n / math.factorial(
                 n
@@ -1384,7 +1392,7 @@ def calculate_ic(
         and abs_phase_difference < taylor_threshold
     ):
         exp_phase_q = cmath.exp(1j * phase_q)
-        series_integral = 0.0
+        series_integral = 0.0 + 0.0j
         for n in range(taylor_terms + 1):
             series_integral = series_integral + (1j * phase_difference) ** n / math.factorial(n) * (
                 -incident_amplitude * taylor_g(n, phase_q)
@@ -1424,7 +1432,7 @@ if NUMBA_AVAILABLE:
             for m in range(1, n + 1):
                 go = g
                 g = (exp_jw - m * go) / jw
-        return g
+        return complex(g)
 
     @njit(cache=True)
     def _calculate_ic_numba(
@@ -1451,7 +1459,7 @@ if NUMBA_AVAILABLE:
                     -incident_amplitude / (n + 1)
                     + exp_phase_q * (incident_amplitude * _taylor_g_numba(n, -phase_q))
                 )
-            return series_integral * area_scale * exp_phase_origin / (1j * phase_q)
+            return complex(series_integral * area_scale * exp_phase_origin / (1j * phase_q))
 
         if abs_phase_p < taylor_threshold and abs_phase_q < taylor_threshold:
             series_integral = 0.0 + 0.0j
@@ -1464,7 +1472,7 @@ if NUMBA_AVAILABLE:
                         / _factorial_numba(nn + n + 2)
                         * incident_amplitude
                     )
-            return series_integral * area_scale * exp_phase_origin
+            return complex(series_integral * area_scale * exp_phase_origin)
 
         if abs_phase_p >= taylor_threshold and abs_phase_q < taylor_threshold:
             exp_phase_p = np.exp(1j * phase_p)
@@ -1473,7 +1481,7 @@ if NUMBA_AVAILABLE:
                 series_integral = series_integral + (1j * phase_q) ** n / _factorial_numba(
                     n
                 ) * incident_amplitude * (_taylor_g_numba(n + 1, -phase_p) / (n + 1))
-            return series_integral * area_scale * exp_phase_origin * exp_phase_p
+            return complex(series_integral * area_scale * exp_phase_origin * exp_phase_p)
 
         if (
             abs_phase_p >= taylor_threshold
@@ -1489,11 +1497,11 @@ if NUMBA_AVAILABLE:
                     -incident_amplitude * _taylor_g_numba(n, phase_q)
                     + exp_phase_q * incident_amplitude / (n + 1)
                 )
-            return series_integral * area_scale * exp_phase_origin / (1j * phase_q)
+            return complex(series_integral * area_scale * exp_phase_origin / (1j * phase_q))
 
         exp_phase_p = np.exp(1j * phase_p)
         exp_phase_q = np.exp(1j * phase_q)
-        return (
+        return complex(
             area_scale
             * exp_phase_origin
             * (
@@ -1979,45 +1987,48 @@ def accumulate_monostatic_sample_numba(
     taylor_threshold: float,
 ) -> tuple[complex, complex, float, float]:
     """Numba-accelerated monostatic accumulation for one (phi, theta) sample."""
-    return _accumulate_monostatic_sample_numba(
-        illumination_flag_mode,
-        illumination_flags,
-        resistivity_values,
-        triangle_areas,
-        surface_alpha_cos,
-        surface_alpha_sin,
-        surface_beta_cos,
-        surface_beta_sin,
-        surface_normal_x,
-        surface_normal_y,
-        surface_normal_z,
-        phase_p_x,
-        phase_p_y,
-        phase_p_z,
-        phase_q_x,
-        phase_q_y,
-        phase_q_z,
-        phase_o_x,
-        phase_o_y,
-        phase_o_z,
-        direction_u,
-        direction_v,
-        direction_w,
-        theta_projection_u,
-        theta_projection_v,
-        theta_projection_w,
-        sine_phi,
-        cosine_phi,
-        incident_field_x,
-        incident_field_y,
-        incident_field_z,
-        two_wave_number,
-        roughness_factor_secondary,
-        normalized_correlation_distance,
-        wavelength_m,
-        incident_amplitude,
-        taylor_terms,
-        taylor_threshold,
+    return cast(
+        tuple[complex, complex, float, float],
+        _accumulate_monostatic_sample_numba(
+            illumination_flag_mode,
+            illumination_flags,
+            resistivity_values,
+            triangle_areas,
+            surface_alpha_cos,
+            surface_alpha_sin,
+            surface_beta_cos,
+            surface_beta_sin,
+            surface_normal_x,
+            surface_normal_y,
+            surface_normal_z,
+            phase_p_x,
+            phase_p_y,
+            phase_p_z,
+            phase_q_x,
+            phase_q_y,
+            phase_q_z,
+            phase_o_x,
+            phase_o_y,
+            phase_o_z,
+            direction_u,
+            direction_v,
+            direction_w,
+            theta_projection_u,
+            theta_projection_v,
+            theta_projection_w,
+            sine_phi,
+            cosine_phi,
+            incident_field_x,
+            incident_field_y,
+            incident_field_z,
+            two_wave_number,
+            roughness_factor_secondary,
+            normalized_correlation_distance,
+            wavelength_m,
+            incident_amplitude,
+            taylor_terms,
+            taylor_threshold,
+        ),
     )
 
 
@@ -2066,48 +2077,51 @@ def accumulate_bistatic_sample_numba(
     taylor_threshold: float,
 ) -> tuple[complex, complex, float, float]:
     """Numba-accelerated bistatic accumulation for one (phi, theta) sample."""
-    return _accumulate_bistatic_sample_numba(
-        illumination_flag_mode,
-        illumination_flags,
-        resistivity_values,
-        triangle_areas,
-        surface_alpha_cos,
-        surface_alpha_sin,
-        surface_beta_cos,
-        surface_beta_sin,
-        surface_normal_x,
-        surface_normal_y,
-        surface_normal_z,
-        phase_p_x,
-        phase_p_y,
-        phase_p_z,
-        phase_q_x,
-        phase_q_y,
-        phase_q_z,
-        phase_o_x,
-        phase_o_y,
-        phase_o_z,
-        incident_direction_u,
-        incident_direction_v,
-        incident_direction_w,
-        observation_direction_u,
-        observation_direction_v,
-        observation_direction_w,
-        theta_projection_u,
-        theta_projection_v,
-        theta_projection_w,
-        sine_phi,
-        cosine_phi,
-        incident_field_x,
-        incident_field_y,
-        incident_field_z,
-        wave_number,
-        roughness_factor_secondary,
-        normalized_correlation_distance,
-        wavelength_m,
-        incident_amplitude,
-        taylor_terms,
-        taylor_threshold,
+    return cast(
+        tuple[complex, complex, float, float],
+        _accumulate_bistatic_sample_numba(
+            illumination_flag_mode,
+            illumination_flags,
+            resistivity_values,
+            triangle_areas,
+            surface_alpha_cos,
+            surface_alpha_sin,
+            surface_beta_cos,
+            surface_beta_sin,
+            surface_normal_x,
+            surface_normal_y,
+            surface_normal_z,
+            phase_p_x,
+            phase_p_y,
+            phase_p_z,
+            phase_q_x,
+            phase_q_y,
+            phase_q_z,
+            phase_o_x,
+            phase_o_y,
+            phase_o_z,
+            incident_direction_u,
+            incident_direction_v,
+            incident_direction_w,
+            observation_direction_u,
+            observation_direction_v,
+            observation_direction_w,
+            theta_projection_u,
+            theta_projection_v,
+            theta_projection_w,
+            sine_phi,
+            cosine_phi,
+            incident_field_x,
+            incident_field_y,
+            incident_field_z,
+            wave_number,
+            roughness_factor_secondary,
+            normalized_correlation_distance,
+            wavelength_m,
+            incident_amplitude,
+            taylor_terms,
+            taylor_threshold,
+        ),
     )
 
 

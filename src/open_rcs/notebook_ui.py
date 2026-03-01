@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 from stl import mesh
@@ -60,7 +60,7 @@ def _rotation_matrix_xyz(roll_deg: float, pitch_deg: float, yaw_deg: float) -> n
         ],
         dtype=float,
     )
-    return rot_z @ rot_y @ rot_x
+    return cast(np.ndarray, rot_z @ rot_y @ rot_x)
 
 
 def _rotate_vertices(
@@ -71,7 +71,7 @@ def _rotate_vertices(
         return vertices
     rotation = _rotation_matrix_xyz(roll_deg, pitch_deg, yaw_deg)
     centroid = np.mean(vertices, axis=0, keepdims=True)
-    return (vertices - centroid) @ rotation.T + centroid
+    return cast(np.ndarray, (vertices - centroid) @ rotation.T + centroid)
 
 
 def _build_rotated_geometry(
@@ -113,7 +113,9 @@ def _select_rcs_component(simulation_result: RcsComputationResult, component: st
         return simulation_result.rcs_theta_db
     if component == "phi":
         return simulation_result.rcs_phi_db
-    return np.maximum(simulation_result.rcs_theta_db, simulation_result.rcs_phi_db)
+    return cast(
+        np.ndarray, np.maximum(simulation_result.rcs_theta_db, simulation_result.rcs_phi_db)
+    )
 
 
 def _build_rcs_surface_xyz(
@@ -855,7 +857,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
 
             _progress_update(0, total_samples)
             if mode_widget.value == "monostatic":
-                simulation_config = MonostaticSimulationConfig(
+                monostatic_config = MonostaticSimulationConfig(
                     input_model=model_widget.value,
                     frequency_hz=float(freq_widget.value) * 1e9,
                     correlation_distance_m=float(corr_widget.value),
@@ -865,13 +867,13 @@ def launch_rcs_widget(project_root: str | Path = "."):
                     material=material,
                 )
                 simulation_result = simulate_monostatic(
-                    simulation_config,
+                    monostatic_config,
                     geometry_data,
                     progress_callback=_progress_update,
                     progress_update_stride=callback_stride,
                 )
             else:
-                simulation_config = BistaticSimulationConfig(
+                bistatic_config = BistaticSimulationConfig(
                     input_model=model_widget.value,
                     frequency_hz=float(freq_widget.value) * 1e9,
                     correlation_distance_m=float(corr_widget.value),
@@ -883,7 +885,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
                     material=material,
                 )
                 simulation_result = simulate_bistatic(
-                    simulation_config,
+                    bistatic_config,
                     geometry_data,
                     progress_callback=_progress_update,
                     progress_update_stride=callback_stride,
