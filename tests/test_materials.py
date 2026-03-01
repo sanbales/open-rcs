@@ -14,10 +14,12 @@ def test_material_roundtrip_and_pec_reflection() -> None:
         "Composite,skin,2.0,1.0,0.01,0.02,0.03\n",
     ]
     table = rf.convert_material_textlist_to_list(rows)
+    material_type_index = int(rf.MaterialEntryIndex.TYPE)
+    first_layer_index = int(rf.MaterialEntryIndex.FIRST_LAYER)
 
-    assert table[0][rf.TYPE] == "PEC"
-    assert table[1][rf.TYPE] == "Composite"
-    assert table[1][rf.LAYERS] == [2.0, 1.0, 0.01, 0.02, 0.03]
+    assert table[0][material_type_index] == rf.MaterialType.PEC.value
+    assert table[1][material_type_index] == rf.MaterialType.COMPOSITE.value
+    assert table[1][first_layer_index] == [2.0, 1.0, 0.01, 0.02, 0.03]
 
     reflection_perpendicular, reflection_parallel = rf.reflection_coefficients(
         rs=float(rf.MATERIAL_SPECIFIC),

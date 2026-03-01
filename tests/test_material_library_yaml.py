@@ -45,15 +45,16 @@ def test_rcsmat_yaml_assignments_with_tags_and_ranges(tmp_path: Path) -> None:
 
     material_table = rf.get_entries_from_material_file(6, str(material_path))
     material_catalog = rf.load_material_catalog(material_path)
+    material_type_index = int(rf.MaterialEntryIndex.TYPE)
 
     assert set(material_catalog.keys()) == {"pec", "coat"}
     assert len(material_table) == 6
-    assert material_table[0][rf.TYPE] == rf.MATERIAL_TYPE_COMPOSITE
-    assert material_table[1][rf.TYPE] == rf.MATERIAL_TYPE_COMPOSITE
-    assert material_table[2][rf.TYPE] == rf.MATERIAL_TYPE_PEC
-    assert material_table[3][rf.TYPE] == rf.MATERIAL_TYPE_PEC
-    assert material_table[4][rf.TYPE] == rf.MATERIAL_TYPE_COMPOSITE
-    assert material_table[5][rf.TYPE] == rf.MATERIAL_TYPE_COMPOSITE
+    assert material_table[0][material_type_index] == rf.MaterialType.COMPOSITE.value
+    assert material_table[1][material_type_index] == rf.MaterialType.COMPOSITE.value
+    assert material_table[2][material_type_index] == rf.MaterialType.PEC.value
+    assert material_table[3][material_type_index] == rf.MaterialType.PEC.value
+    assert material_table[4][material_type_index] == rf.MaterialType.COMPOSITE.value
+    assert material_table[5][material_type_index] == rf.MaterialType.COMPOSITE.value
 
 
 def test_rcsmat_yaml_reports_invalid_tag_reference(tmp_path: Path) -> None:

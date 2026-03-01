@@ -13,11 +13,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from .model_types import (
-    AngleSweep,
-    BistaticSimulationConfig,
     GeometryData,
-    MaterialConfig,
-    MonostaticSimulationConfig,
 )
 from .stl_module import convert_stl
 
@@ -36,20 +32,6 @@ class FontSize(IntEnum):
     SMALL = 8
     MEDIUM = 10
     LARGE = 12
-
-
-class LegacyInputIndex(IntEnum):
-    INPUT_MODEL = 0
-    FREQUENCY_GHZ = 1
-    RESISTIVITY_MODE = 5
-    PHI_START = 6
-    PHI_STOP = 7
-    PHI_STEP = 8
-    THETA_START = 9
-    THETA_STOP = 10
-    THETA_STEP = 11
-    INCIDENT_THETA = 12
-    INCIDENT_PHI = 13
 
 
 class SphericalIndex(IntEnum):
@@ -95,29 +77,10 @@ MaterialCatalog: TypeAlias = dict[str, MaterialEntry]
 _NUMBA_PLACEHOLDER_INT_ARRAY = np.zeros(1, dtype=np.int32)
 _NUMBA_PLACEHOLDER_FLOAT_ARRAY = np.zeros((1, 1), dtype=np.float64)
 
-# Backward-compatible aliases used by tests and older call sites.
-SMALL_SIZE: Final[int] = int(FontSize.SMALL)
-MEDIUM_SIZE: Final[int] = int(FontSize.MEDIUM)
-BIGGER_SIZE: Final[int] = int(FontSize.LARGE)
-INPUT_MODEL: Final[int] = int(LegacyInputIndex.INPUT_MODEL)
-FREQUENCY: Final[int] = int(LegacyInputIndex.FREQUENCY_GHZ)
-STANDART_DEVIATION: Final[int] = 3
-RESISTIVITY: Final[int] = int(LegacyInputIndex.RESISTIVITY_MODE)
-TYPE: Final[int] = int(MaterialEntryIndex.TYPE)
-THETA: Final[int] = int(SphericalIndex.THETA)
-NTRIA: Final[int] = 14
-DESCRIPTION: Final[int] = int(MaterialEntryIndex.DESCRIPTION)
-LAYERS: Final[int] = int(MaterialEntryIndex.FIRST_LAYER)
-MATERIAL_TYPE_PEC: Final[str] = MaterialType.PEC.value
-MATERIAL_TYPE_COMPOSITE: Final[str] = MaterialType.COMPOSITE.value
-MATERIAL_TYPE_COMPOSITE_ON_PEC: Final[str] = MaterialType.COMPOSITE_ON_PEC.value
-MATERIAL_TYPE_MULTI_LAYER: Final[str] = MaterialType.MULTI_LAYER.value
-MATERIAL_TYPE_MULTI_LAYER_ON_PEC: Final[str] = MaterialType.MULTI_LAYER_ON_PEC.value
-MATERIAL_CODE_PEC: Final[int] = int(MaterialCode.PEC)
-MATERIAL_CODE_COMPOSITE: Final[int] = int(MaterialCode.COMPOSITE)
-MATERIAL_CODE_COMPOSITE_ON_PEC: Final[int] = int(MaterialCode.COMPOSITE_ON_PEC)
-MATERIAL_CODE_MULTI_LAYER: Final[int] = int(MaterialCode.MULTI_LAYER)
-MATERIAL_CODE_MULTI_LAYER_ON_PEC: Final[int] = int(MaterialCode.MULTI_LAYER_ON_PEC)
+_MAT_CODE_PEC: Final[int] = int(MaterialCode.PEC)
+_MAT_CODE_COMPOSITE: Final[int] = int(MaterialCode.COMPOSITE)
+_MAT_CODE_COMPOSITE_ON_PEC: Final[int] = int(MaterialCode.COMPOSITE_ON_PEC)
+_MAT_CODE_MULTI_LAYER_ON_PEC: Final[int] = int(MaterialCode.MULTI_LAYER_ON_PEC)
 
 
 def get_polarization(incident_polarization: int) -> tuple[str, complex, complex]:
@@ -276,72 +239,6 @@ def build_geometry_from_stl(stl_path: str | Path, rs_value: float) -> GeometryDa
         vertex_indices=vind,
         vertex_coordinates=r,
     )
-
-
-def _parse_param(value: str) -> float | str:  # pragma: no cover
-    value = value.strip()
-    try:
-        return float(value)
-    except ValueError:
-        return value
-
-
-def get_params_from_file(  # pragma: no cover
-    method: str,
-) -> MonostaticSimulationConfig | BistaticSimulationConfig:
-    """Read input files and return a typed simulation configuration."""
-    input_data_file = Path(f"./input_files/input_data_file_{method}.dat")
-    param_list: list[float | str] = []
-    with input_data_file.open("r", encoding="utf-8") as params:
-        for row in params:
-            row = row.strip()
-            if row and not row.startswith("#"):
-                param_list.append(_parse_param(row))
-
-    param_list[LegacyInputIndex.FREQUENCY_GHZ] = (
-        float(param_list[LegacyInputIndex.FREQUENCY_GHZ]) * 1e9
-    )
-    convert_stl(Path("./stl_models") / str(param_list[LegacyInputIndex.INPUT_MODEL]))
-
-    if int(param_list[LegacyInputIndex.RESISTIVITY_MODE]) != MATERIAL_SPECIFIC:
-        param_list[-1] = "matrl.txt"
-
-    angle_sweep = AngleSweep(
-        phi_start_deg=float(param_list[6]),
-        phi_stop_deg=float(param_list[7]),
-        phi_step_deg=float(param_list[8]),
-        theta_start_deg=float(param_list[9]),
-        theta_stop_deg=float(param_list[10]),
-        theta_step_deg=float(param_list[11]),
-    )
-    material = MaterialConfig(
-        resistivity_mode=int(param_list[LegacyInputIndex.RESISTIVITY_MODE]),
-        material_path=str(param_list[-1]),
-    )
-
-    if method == "monostatic":
-        return MonostaticSimulationConfig(
-            input_model=str(param_list[LegacyInputIndex.INPUT_MODEL]),
-            frequency_hz=float(param_list[LegacyInputIndex.FREQUENCY_GHZ]),
-            correlation_distance_m=float(param_list[2]),
-            standard_deviation_m=float(param_list[3]),
-            incident_polarization=int(param_list[4]),
-            angle_sweep=angle_sweep,
-            material=material,
-        )
-    if method == "bistatic":
-        return BistaticSimulationConfig(
-            input_model=str(param_list[LegacyInputIndex.INPUT_MODEL]),
-            frequency_hz=float(param_list[LegacyInputIndex.FREQUENCY_GHZ]),
-            correlation_distance_m=float(param_list[2]),
-            standard_deviation_m=float(param_list[3]),
-            incident_polarization=int(param_list[4]),
-            angle_sweep=angle_sweep,
-            incident_theta_deg=float(param_list[12]),
-            incident_phi_deg=float(param_list[13]),
-            material=material,
-        )
-    raise ValueError("method must be 'monostatic' or 'bistatic'.")
 
 
 def read_coordinates(path: str | Path = "./coordinates.txt"):  # pragma: no cover
@@ -2031,10 +1928,10 @@ if NUMBA_AVAILABLE:
         thickness_m: np.ndarray,
     ) -> tuple[complex, complex]:  # pragma: no cover
         material_code = material_type_codes[triangle_index]
-        if material_code == MATERIAL_CODE_PEC:
+        if material_code == _MAT_CODE_PEC:
             return -1.0 + 0.0j, -1.0 + 0.0j
 
-        if material_code == MATERIAL_CODE_COMPOSITE:
+        if material_code == _MAT_CODE_COMPOSITE:
             eps = epsilon_r[triangle_index, 0]
             loss = loss_tangent[triangle_index, 0]
             mu_r = mu_r_real[triangle_index, 0]
@@ -2105,8 +2002,8 @@ if NUMBA_AVAILABLE:
         previous_z_perpendicular = 0.0 + 0.0j
 
         if material_code in (
-            MATERIAL_CODE_COMPOSITE_ON_PEC,
-            MATERIAL_CODE_MULTI_LAYER_ON_PEC,
+            _MAT_CODE_COMPOSITE_ON_PEC,
+            _MAT_CODE_MULTI_LAYER_ON_PEC,
         ):
             for layer_index in range(layer_count):
                 eps = epsilon_r[triangle_index, layer_index]
@@ -2171,7 +2068,7 @@ if NUMBA_AVAILABLE:
             reflection_perpendicular = (w10s - w11s) / (w00s - w01s)
             return reflection_perpendicular, reflection_parallel
 
-        # MATERIAL_CODE_MULTI_LAYER
+        # MaterialCode.MULTI_LAYER
         previous_epsilon = 1.0 + 0.0j
         previous_mu = 1.0 + 0.0j
         previous_theta = local_theta

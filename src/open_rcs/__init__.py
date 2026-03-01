@@ -1,6 +1,7 @@
 """Open RCS computational package."""
 
 from .guidance import RoughnessCorrelationGuidance, estimate_roughness_correlation_guidance
+from .io import get_params_from_file
 from .model_types import (
     AngleSweep,
     BistaticSimulationConfig,
@@ -17,7 +18,6 @@ from .rcs_bistatic import run_bistatic, simulate_bistatic
 from .rcs_functions import (
     build_geometry_from_stl,
     extract_coordinates_data,
-    get_params_from_file,
     load_material_catalog,
 )
 from .rcs_monostatic import run_monostatic, simulate_monostatic
