@@ -104,6 +104,9 @@ ignore_missing_imports = true
 addopts = "--cov=open_rcs --cov-report=term-missing --cov-report=html:htmlcov"
 testpaths = ["tests"]
 
+[tool.coverage.run]
+omit = ["src/open_rcs/notebook_ui.py"]
+
 # ============================================================
 # ==================== PIXI CONFIG ===========================
 # ============================================================

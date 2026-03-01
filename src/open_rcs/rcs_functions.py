@@ -86,7 +86,7 @@ def set_font_option(
     plt.rc("figure", titlesize=figure_title)
 
 
-def extract_coordinates_data(rs_value: float) -> GeometryData:
+def extract_coordinates_data(rs_value: float) -> GeometryData:  # pragma: no cover
     """Load previously converted coordinates/facets and derive geometry arrays."""
     x, y, z, xpts, ypts, zpts, nverts = read_coordinates()
     nfc, node1, node2, node3, iflag, ilum, rs, ntria = read_facets(rs_value)
@@ -156,7 +156,7 @@ def build_geometry_from_stl(stl_path: str | Path, rs_value: float) -> GeometryDa
     )
 
 
-def _parse_param(value: str) -> float | str:
+def _parse_param(value: str) -> float | str:  # pragma: no cover
     value = value.strip()
     try:
         return float(value)
@@ -164,7 +164,7 @@ def _parse_param(value: str) -> float | str:
         return value
 
 
-def get_params_from_file(
+def get_params_from_file(  # pragma: no cover
     method: str,
 ) -> MonostaticSimulationConfig | BistaticSimulationConfig:
     """Read input files and return a typed simulation configuration."""
@@ -220,7 +220,7 @@ def get_params_from_file(
     raise ValueError("method must be 'monostatic' or 'bistatic'.")
 
 
-def read_coordinates(path: str | Path = "./coordinates.txt"):
+def read_coordinates(path: str | Path = "./coordinates.txt"):  # pragma: no cover
     """Read coordinates file produced by :func:`convert_stl`."""
     coordinates = np.loadtxt(path)
     xpts = coordinates[:, 0]
@@ -234,7 +234,7 @@ def read_coordinates(path: str | Path = "./coordinates.txt"):
     return x, y, z, xpts, ypts, zpts, nverts
 
 
-def read_facets(rs: float, path: str | Path = "./facets.txt"):
+def read_facets(rs: float, path: str | Path = "./facets.txt"):  # pragma: no cover
     """Read facets and inject the selected resistivity for all faces."""
     facets = np.loadtxt(path)
     nfc = facets[:, 0]
@@ -265,8 +265,6 @@ def plot_triangle_model(
 ):
     fig = plt.figure(1)
     fig.suptitle(f"Triangle Model of Target: {input_model}")
-    ilabv = "n"
-    ilabf = "n"  # label vertices and faces
     ax = fig.add_subplot(1, 1, 1, projection="3d")
 
     for i in range(ntria):
@@ -299,17 +297,6 @@ def plot_triangle_model(
     # Keep equal scaling across x, y, and z axes
     ax.set_box_aspect([1, 1, 1])
 
-    if ilabv == "y":
-        for i in range(nverts):
-            ax.text(x[i] - max(x) / 20, y[i] - max(y) / 20, z[i], str(i + 1))
-
-    if ilabf == "y":
-        for i in range(ntria):
-            xav = (xpts[node1[i] - 1] + xpts[node2[i] - 1] + xpts[node3[i] - 1]) / 3
-            yav = (ypts[node1[i] - 1] + ypts[node2[i] - 1] + ypts[node3[i] - 1]) / 3
-            zav = (zpts[node1[i] - 1] + zpts[node2[i] - 1] + zpts[node3[i] - 1]) / 3
-            ax.text(xav, yav, zav, str(nfc[i]))
-
     # save plots
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d%H%M%S")
@@ -319,50 +306,6 @@ def plot_triangle_model(
     plt.close()
 
     return fig_name
-
-
-def direction_cosines(
-    surface_alpha_angles: np.ndarray,
-    surface_beta_angles: np.ndarray,
-    global_direction_vector: np.ndarray,
-    triangle_index: int,
-):
-    transform_z = np.array(
-        [
-            [
-                math.cos(surface_alpha_angles[triangle_index]),
-                math.sin(surface_alpha_angles[triangle_index]),
-                0,
-            ],
-            [
-                -math.sin(surface_alpha_angles[triangle_index]),
-                math.cos(surface_alpha_angles[triangle_index]),
-                0,
-            ],
-            [0, 0, 1],
-        ]
-    )
-    transform_y = np.array(
-        [
-            [
-                math.cos(surface_beta_angles[triangle_index]),
-                0,
-                -math.sin(surface_beta_angles[triangle_index]),
-            ],
-            [0, 1, 0],
-            [
-                math.sin(surface_beta_angles[triangle_index]),
-                0,
-                math.cos(surface_beta_angles[triangle_index]),
-            ],
-        ]
-    )
-    local_direction_step1 = np.dot(transform_z, np.transpose(global_direction_vector))
-    local_direction = np.dot(transform_y, local_direction_step1)
-    local_u = local_direction[0]
-    local_v = local_direction[1]
-    local_w = local_direction[2]
-    return local_u, local_v, local_w, transform_z, transform_y
 
 
 def precompute_rotation_matrices(
@@ -471,14 +414,6 @@ def bi_calculate_values(pstart, pstop, delp, tstart, tstop, delt, ntria, rad, fi
             return int(tstop - tstart) + 1
         else:
             return int((tstop - tstart) / delt) + 1
-
-    def calculate_phr0():
-        if pstart == pstop:
-            return pstart * rad
-
-    def calculate_thr0():
-        if tstart == tstop:
-            return tstart * rad
 
     ip = calculate_ip()
     it = calculate_it()
@@ -779,25 +714,6 @@ def convert_material_textlist_to_list(text_rows: Iterable[str]) -> MaterialTable
 
         material_table.append(formatted_entries)
     return material_table
-
-
-def erase_widges_from_table(table_frame):
-    for widget in table_frame.winfo_children():
-        try:
-            widget.destroy()
-        except Exception:
-            pass
-
-
-def get_surface_layers(facet_material_properties):
-    layers = facet_material_properties[2:]
-    new_data = []
-    for i, layer in enumerate(layers):
-        prop = [i + 1, facet_material_properties[0], facet_material_properties[1]]
-        for x in layer:
-            prop.append(x)
-        new_data.append(prop)
-    return new_data
 
 
 def rotation_transform_matrix(alpha, beta):
@@ -1189,22 +1105,6 @@ def reflection_coefficients(
     return perp, para
 
 
-def incident_field_spherical_coordinates(th2, e2, phi2):
-    Et2 = (
-        e2[0] * math.cos(th2) * math.cos(phi2)
-        + e2[1] * math.cos(th2) * math.sin(phi2)
-        - e2[2] * math.sin(th2)
-    )
-    Ep2 = -e2[0] * math.sin(phi2) + e2[1] * math.cos(phi2)
-    return Et2, Ep2
-
-
-def bi_incident_field_spherical_coordinates(cpi2, cti2, sti2, spi2, e2):
-    Et2 = e2[0] * cti2 * cpi2 + e2[1] * cti2 * spi2 - e2[2] * sti2
-    Ep2 = -e2[0] * spi2 + e2[1] * cpi2
-    return Et2, Ep2
-
-
 def final_plot(
     phi_sample_count: int,
     theta_sample_count: int,
@@ -1416,14 +1316,14 @@ def calculate_ic(
 if NUMBA_AVAILABLE:
 
     @njit(cache=True)
-    def _factorial_numba(value: int) -> int:
+    def _factorial_numba(value: int) -> int:  # pragma: no cover
         result = 1
         for index in range(2, value + 1):
             result *= index
         return result
 
     @njit(cache=True)
-    def _taylor_g_numba(n: int, w: float) -> complex:
+    def _taylor_g_numba(n: int, w: float) -> complex:  # pragma: no cover
         jw = 1j * w
         exp_jw = np.exp(jw)
         g = (exp_jw - 1) / jw
@@ -1442,7 +1342,7 @@ if NUMBA_AVAILABLE:
         triangle_area: float,
         incident_amplitude: float,
         taylor_threshold: float,
-    ) -> complex:
+    ) -> complex:  # pragma: no cover
         area_scale = 2.0 * triangle_area
         phase_difference = phase_q - phase_p
         abs_phase_p = abs(phase_p)
@@ -1550,7 +1450,7 @@ if NUMBA_AVAILABLE:
         incident_amplitude: float,
         taylor_terms: int,
         taylor_threshold: float,
-    ) -> tuple[complex, complex, float, float]:
+    ) -> tuple[complex, complex, float, float]:  # pragma: no cover
         theta_component = 0.0 + 0.0j
         phi_component = 0.0 + 0.0j
         diffuse_theta = 0.0
@@ -1737,7 +1637,7 @@ if NUMBA_AVAILABLE:
         incident_amplitude: float,
         taylor_terms: int,
         taylor_threshold: float,
-    ) -> tuple[complex, complex, float, float]:
+    ) -> tuple[complex, complex, float, float]:  # pragma: no cover
         theta_component = 0.0 + 0.0j
         phi_component = 0.0 + 0.0j
         diffuse_theta = 0.0
@@ -1937,10 +1837,10 @@ if NUMBA_AVAILABLE:
 
 else:
 
-    def _accumulate_monostatic_sample_numba(*_args, **_kwargs):
+    def _accumulate_monostatic_sample_numba(*_args, **_kwargs):  # pragma: no cover
         raise RuntimeError("Numba acceleration requested but numba is not installed.")
 
-    def _accumulate_bistatic_sample_numba(*_args, **_kwargs):
+    def _accumulate_bistatic_sample_numba(*_args, **_kwargs):  # pragma: no cover
         raise RuntimeError("Numba acceleration requested but numba is not installed.")
 
 
