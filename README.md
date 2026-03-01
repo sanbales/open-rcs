@@ -1,139 +1,155 @@
-# Open RCS: an open-source platform for calculating Radar Cross Section from 3D targets
+# Open RCS
 
-The software Open RCS is inspired by POFACETS with an open source plataform and is being developed incrementally, validating the outputs generated from the same inputs, but with different types of CAD models, from the simplest to the most complex. The software will use both Physical Optics (PO) and Geometrical Optics (GO) techniques for RCS measurement and it will be divided into monostatic and bistatic modules.
+Open RCS is a Python toolkit for Radar Cross Section (RCS) analysis from STL geometry, with monostatic and bistatic solvers.
 
-## In this README:
+The project now uses a Jupyter notebook workflow for interactive use. The previous Tkinter desktop widget is no longer part of the active workflow.
 
-- [Theoretical Foundation](#theoretical-foundation)
-- [Software Information](#software-information)
-- [Usage](#usage)
+## Table of Contents
 
-  - [Initial setup](#initial-setup)
-  - [Monostatic Simulation](#monostatic-simulation)
-  - [Bistatic Simulation](#bistatic-simulation)
-
+- [Quick Start (Pixi)](#quick-start-pixi)
+- [Use in Jupyter](#use-in-jupyter)
+- [Developer Setup](#developer-setup)
+- [Help Developers Get Started](#help-developers-get-started)
 - [Author Info](#author-info)
 - [References](#references)
 
-## Theoretical Foundation
+## Quick Start (Pixi)
 
-Radar cross section (RCS) is a measure that shows how much a radar can detect an object. If this measurement is large, it is more easily detectable by radar. Many factors can affect this measurement, such as: the size of the target related to the wavelength, the kind of material that covers the target, the frequency of the radar, the angle of incidence, the geometry of the target, among others.
+1. Install Pixi:
+   https://pixi.sh/latest/
+2. Clone the repository:
 
-Since the invention of radar in World War II, its use has been a crucial factor in the success or failure of military campaigns. Concurrent with the development of radar detection capabilities, techniques to reduce the electromagnetic signature or RCS of important military platforms, such as aircraft, vessels, and armored vehicles, has proven to be an essential line of investment to ensure the success of such operations.
+```bash
+git clone https://github.com/comp-ime-eb-br/open-rcs
+cd open-rcs
+```
 
-Despite the fundamentals related to RCS being mastered since the time of the development of the first radar, defining the electromagnetic signature of a target is still a highly complex task. Analytical calculation is only possible for simple geometry targets. For real objects, we can only determine the RCS through experimental measurement or through computational numerical simulation; each method has its advantages and disadvantages. One of the great advantages of the computational simulation of the RCS is that the real target is not always available, or it is still in the design phase. When the objective is to reduce the RCS, it is practically unfeasible to make several changes in the target geometry or RAM application with many different configurations, that is why RCS simulation is a valued technique for studying military projects.
+3. Install environments and dependencies:
+
+```bash
+pixi install
+```
+
+4. Launch JupyterLab:
+
+```bash
+pixi run lab
+```
+
+This is the fastest way to start using Open RCS.
+
+## Use in Jupyter
+
+Once JupyterLab starts, open a notebook and use the notebook UI:
+
+```python
+from open_rcs import launch_rcs_widget
+
+widget = launch_rcs_widget("..")
+```
+
+You can also call the solvers directly:
+
+```python
+from open_rcs import (
+    AngleSweep,
+    MaterialConfig,
+    MonostaticSimulationConfig,
+    build_geometry_from_stl,
+    simulate_monostatic,
+)
+
+geometry = build_geometry_from_stl("stl_models/plate.stl", rs_value=0.2)
+config = MonostaticSimulationConfig(
+    input_model="plate.stl",
+    frequency_hz=10.0e9,
+    correlation_distance_m=0.0,
+    standard_deviation_m=0.0,
+    incident_polarization=0,
+    angle_sweep=AngleSweep(
+        phi_start_deg=0.0,
+        phi_stop_deg=90.0,
+        phi_step_deg=1.0,
+        theta_start_deg=0.0,
+        theta_stop_deg=90.0,
+        theta_step_deg=1.0,
+    ),
+    material=MaterialConfig(resistivity_mode=0.2, material_path="materials/example.rcsmat"),
+)
+result = simulate_monostatic(config, geometry)
+```
+
+## Developer Setup
+
+Use the `dev` Pixi environment for lint, type checks, tests, and release tasks:
+
+```bash
+pixi run test
+```
+
+Coverage reports are generated automatically by pytest and written to:
+
+- `htmlcov/index.html`
+
+## Help Developers Get Started
+
+Common Pixi commands:
+
+| Goal | Command |
+|---|---|
+| Launch JupyterLab | `pixi run lab` |
+| Run tests | `pixi run test` |
+| Run lint checks | `pixi run lint` |
+| Auto-fix lint issues | `pixi run fix` |
+| Format code | `pixi run format` |
+| Run type checks | `pixi run typecheck` |
+| Run lint + typecheck | `pixi run check` |
+| Run full local validation | `pixi run pre-commit` |
+| Build package | `pixi run build` |
+| Upload package artifacts | `pixi run release` |
+| Bump patch version in `pyproject.toml` | `pixi run bump-patch` |
+| Install project Jupyter kernel | `pixi run kernel` |
 
 ## Software Information
 
-The present version of Open RCS consists of the implementation of the monostatic module, whose code will serve as the basis for implementing the bistatic module after refactoring and modularization of the initial version. The method used in the simulation is an approximation by physical optics (PO). The reflection on each facet is processed as an isolated surface without including multiple reflections or edge diffractions. Each facet is considered entirely hidden or fully illuminated by the incident wave, which determines whether or not this will be computed in calculating the final object's RCS. Furthermore, the polarization TM-z ou TE-z was represented through complex types in Python 3.
+The current version of **Open RCS** consists of a monostatic module implementation, which will serve as the architectural basis for a future bistatic module following planned refactoring and modularization. The simulation employs a **Physical Optics (PO)** approximation that was derived from Jenn's POFACETS. In this method, reflections on each facet are processed as isolated surfaces, excluding multiple reflections and edge diffractions. Each facet is treated as either entirely shadowed or fully illuminated by the incident wave, a binary determination that dictates its contribution to the final RCS calculation. Furthermore, **TMz** and **TEz** polarizations are represented using complex data types in Python 3.
 
-The calculation of the intensity captured by the reflection occurs through a Taylor series, whose parameters of the region and number of terms were chosen arbitrarily. These parameters have external optimization references in relation to accuracy and computational time for calculating the RCS using this approximation. Using this method, it is possible to generate the intensity and electromagnetic power results for each direction.
+Reflection intensity is calculated via a **Taylor series expansion**, where the regional parameters and the number of terms were initially selected to balance computational requirements. These parameters are guided by external optimization references to ensure accuracy and efficiency within the PO approximation. Using this method, the software generates intensity and electromagnetic power results for each specified direction.
 
-The reflection directions are defined using simple spherical coordinates from the input range and sampling of phi and theta. If only a value of phi is specified for an interval of theta, a projection graph will be plotted in a theta-cut, and vice versa. In the case where phi and theta are both non-unitary, i.e., defined on an interval, a two-dimensional contour of the directing cosine.
+Reflection directions are defined using **spherical coordinates** derived from the input range and sampling of $\phi$ (phi) and $\theta$ (theta). If a single value of $\phi$ is specified for an interval of $\theta$, a projection graph is plotted as a **$\theta$-cut** (and vice versa). In cases where both $\phi$ and $\theta$ are defined over intervals, the software generates a two-dimensional contour map of the **direction cosines**.
 
-## Usage
+## Theoretical Foundation: Radar Cross Section (RCS)
 
-### Initial setup
+Radar Cross Section (RCS) is a measure of an object's detectability by radar, where a higher value indicates a more visible target. It is determined by several factors, including the ratio of the target's size to the radar wavelength, the material composition (e.g., radar-absorbent materials), incident angles, and the object's geometry. 
 
-1. Clone the repository.
+Since the invention of radar during World War II, controlling the electromagnetic signature of military platforms—such as aircraft, vessels, and armored vehicles—has been critical to operational success. While the fundamentals of RCS have been understood for decades, calculating the exact electromagnetic signature of complex, real-world targets remains challenging. 
 
-   _You can do it by running:_
-
-   ```
-   git clone https://github.com/comp-ime-eb-br/open-rcs
-   ```
-
-2. Install Python 3.10.9+ and libraries
-
-   You can do it by running the .exe available on the Python official website: [Windows](https://www.python.org/downloads/windows/) | [MacOS](https://www.python.org/downloads/macos/) | [Others](https://www.python.org/download/other/)
-
-   _If you are using pip you can do it by running:_
-
-   ```
-   pip install python3
-   pip install -r requirements.txt
-   ```
-
-4. In order to start the application run the openrcs.py file
-
-   ```
-   python openrcs.py
-   ```
-
-### Monostatic Simulation
-
-1. Input the simulation parameters.
-
-2. Select the STL file
-
-3. Press the generate results ("Gerar Resultados") button.
-
-  <img src='img/openrcs_monostatic.png' width='900'>
-
-Alternatively, you can run the RCS simulation with the .dat file and press the generate results from input file ("Gerar Resultados do Input File") button.
-
-The input parameters should be added to the input_files/input_data_file_monostatic.dat file, in the following model:
-
-  <img src='img/inputs_monostatic.png' width='300'>
-
-### Bistatic Simulation
-
-1. Input the simulation parameters.
-
-2. Select the STL file
-
-3. Press the generate results ("Gerar Resultados") button.
-
-  <img src='img/openrcs_bistatic.png' width='900'>
-
-Alternatively, you can run the RCS simulation with the .dat file and press the generate results from input file ("Gerar Resultados do Input File") button.
-
-The input parameters should be added to the input_files/input_data_file_bistatic.dat file, in the following model:
-
-  <img src='img/inputs_bistatic.png' width='300'>
-
-### Material Properties
-
-For both methods presented above, it is possible to define certain characteristics of the target material analyzed in the simulation.
-This window will open if "Material Específico" is selected as the input for Resistivity, or if the input file input_data_file_'some_method'.dat has "configure" written on the last line. Once the window is open, you can:
-
-  1. Enter the material parameters.
-
-  2. (Optional) Press "Ver Camadas Atuais" to view the properties that have already been added.
-
-  3. (Optional) Press "Salvar" to save the current material properties.
-
-  4. Press 'Calcular RCS' to use the material parameters entered in the current window, or press 'Calcular com Arquivo' to select a saved material property file.
-
-  <img src='img/openrcs_material_window.png' width='300'>
+Analytical calculations are only feasible for simple, ideal shapes. Therefore, determining the RCS of complex objects relies on experimental measurements or computational numerical simulations. Numerical simulation is especially valuable when the physical target is unavailable or still in the design phase, allowing for numerous design iterations and material evaluations (RAM application) that would otherwise be impractical.
 
 ## Author Info
 
-The software was developed in a Computer and Communications Engineer graduation project as requirement to acquiring a bachelor degree in these areas. The graduating students and advisors involved are mentioned bellow, with their following contact info:
+The software was developed in a Computer and Communications Engineer graduation project as requirement to acquiring a bachelor degree in these areas. The graduating students and advisors involved are mentioned below, with their contact info:
 
 - Amanda Assis Lavinsky (amanda.lavinsky@ime.eb.br)
-- 1º Ten Lucas Machado Couto Bezerra (lucas.bezerra@ime.eb.br)
-- 1º Ten Mayara Ribeiro Mendonça (mayara.mendonca@ime.eb.br)
-- 1º Ten Yu Yi Wang Xia (yu.xia@ime.eb.br)
-- 1º Ten Augusto Henrique Gonçalves Marques (augusto.henrique12345@protonmail.com)
-- 1º Ten Daniel Ambrózio Bretherick Marques (danielbretherick@gmail.com)
-- 1º Ten Letícia Vieira da Fonseca (leticiavieiradafonseca@hotmail.com)
-- 1º Ten Rafael Pontes tenório Lima (rafael.pontes882@gmail.com)
+- 1o Ten Lucas Machado Couto Bezerra (lucas.bezerra@ime.eb.br)
+- 1o Ten Mayara Ribeiro Mendonca (mayara.mendonca@ime.eb.br)
+- 1o Ten Yu Yi Wang Xia (yu.xia@ime.eb.br)
+- 1o Ten Augusto Henrique Goncalves Marques (augusto.henrique12345@protonmail.com)
+- 1o Ten Daniel Ambrozio Bretherick Marques (danielbretherick@gmail.com)
+- 1o Ten Leticia Vieira da Fonseca (leticiavieiradafonseca@hotmail.com)
+- 1o Ten Rafael Pontes tenorio Lima (rafael.pontes882@gmail.com)
 - Maj Gabriela Moutinho de Souza Dias (gabriela@ime.eb.br)
 - TC Claudio Augusto Barreto Saunders Filho (saunders@ime.eb.br)
 - Cel Clayton Escouper das Chagas (escouper@ime.eb.br)
 
+The initial implementation by the CCE team was further extended by Dr. Santiago Balestrini-Robinson (sanbales@gmail.com).
+
 ## References
 
-1. Open Source Initiative (n.d.). Open Source Initiative. https://opensource.org/
-2. Battery Open Source Software Index (n.d.). Battery Open Source Software Index (BOSS). https://www.battery.com/blog/boss-index-tracking-explosive-growth-ope
-   n-source-software/
-3. Guo, P.: Python is now the most popular introductory teaching language at top U.S. Universities. https://cacm.acm.org/blogs/blog-cacm/176450-python-is-now
-   -the-most-popular-introductory-teaching-language-at-top-us-universities/fulltext (2014)
-4. McCann, J.: The meteoric rise of open source and why investors should care. Forbes. https://www.forbes.com/sites/forbestechcouncil/2017/09/22/the-meteoric-rise-of-open-source-and-why-investors-should-care (2017)
-5. Knott, E. F., Shaeffer, J.F., Tuley, M.T.: Radar Cross Section. Artech House (1993)
-6. Ruck, G.: Radar Cross Section Handbook: Volume 1. Springer US. (1970)
-7. Sumithra, P., Thiripurasundari, D. (2017). A review on Computational Electro-magnetics Methods. Advanced Electromagnetics, Vol. 6, No. 1, March 2017.
-8. Jenn, D.: Radar and laser cross section engineering. American Institute of Aeronau-tics and Astronautics, Inc. (2005)
-9. Swords, S. S.: Technical History of the Beginnings of Radar. Institute of Electrical Engineers (1986)
-10. Chatzigeorgiadis, F., Jenn, D.C.: A MATLAB physical-optics RCS prediction code. IEEE Antennas and Propagation Magazine (2004)
+1. Knott, E. F., Shaeffer, J. F., & Tuley, M. T. (1993). *Radar Cross Section*. Artech House.
+2. Ruck, G. T., Barrick, D. E., Stuart, W. D., & Krichbaum, C. K. (1970). *Radar Cross Section Handbook* (Vol. 1). Plenum Press/Springer US.
+3. Sumithra, P., & Thiripurasundari, D. (2017). A review on computational electromagnetics methods. *Advanced Electromagnetics*, *6*(1), 45–55.
+4. Jenn, D. C. (2005). *Radar and Laser Cross Section Engineering* (2nd ed.). American Institute of Aeronautics and Astronautics.
+5. Swords, S. S. (1986). *Technical History of the Beginnings of Radar*. Peter Peregrinus Ltd. on behalf of the Institution of Electrical Engineers.
+6. Chatzigeorgiadis, F., & Jenn, D. C. (2004). A MATLAB physical-optics RCS prediction code. *IEEE Antennas and Propagation Magazine*, *46*(4), 137–139.
+
