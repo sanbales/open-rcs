@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Pixi
+        uses: prefix-dev/setup-pixi@v0
+        with:
+          pixi-version: v0.51.1
+
+      - name: Install environment
+        run: pixi install -e . --environment dev
+
+      - name: Run formatting and lint checks
+        run: pixi run --environment dev lint
+
+      - name: Run type check
+        run: pixi run --environment dev typecheck
+
+      - name: Run tests
+        run: pixi run --environment dev test
