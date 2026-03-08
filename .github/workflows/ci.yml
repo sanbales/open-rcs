@@ -21,7 +21,7 @@ jobs:
           pixi-version: latest
 
       - name: Install environment
-        run: pixi install -e . --environment dev
+        run: pixi install --environment dev
 
       - name: Run formatting and lint checks
         run: pixi run --environment dev lint
