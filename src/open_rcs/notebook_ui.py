@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 from time import perf_counter
 from typing import Any, cast
@@ -22,6 +23,32 @@ from .model_types import (
 )
 from .rcs_bistatic import simulate_bistatic
 from .rcs_monostatic import simulate_monostatic
+
+_THETA_COMPONENT_COLOR = "#1f77b4"
+_PHI_COMPONENT_COLOR = "#d62728"
+
+
+@dataclass(slots=True)
+class _SweepCut:
+    """One 2D cut through the simulated RCS grid."""
+
+    sweep_axis: str
+    angle_values_deg: np.ndarray
+    rcs_theta_db: np.ndarray
+    rcs_phi_db: np.ndarray
+    fixed_axis: str
+    fixed_angle_deg: float
+
+
+def _nearest_angle_index(angle_values_deg: np.ndarray, target_deg: float, *, circular: bool = False) -> int:
+    """Return the index of the sample closest to the requested angle."""
+    values = np.asarray(angle_values_deg, dtype=float)
+    if values.size == 0:
+        return 0
+    distance = np.abs(values - float(target_deg))
+    if circular:
+        distance = np.minimum(distance, 360.0 - distance)
+    return int(np.argmin(distance))
 
 
 def _load_mesh_vertices_faces(stl_path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -144,50 +171,158 @@ def _build_rcs_surface_xyz(
     return surface_x, surface_y, surface_z, rcs_db
 
 
-def _build_2d_cut(
-    simulation_result: RcsComputationResult,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return angle-axis and theta/phi RCS cuts for 2D plotting."""
-    phi_count, theta_count = simulation_result.phi_grid_deg.shape
-    if phi_count == 1:
-        angle_values = simulation_result.theta_grid_deg[0]
-        return angle_values, simulation_result.rcs_theta_db[0], simulation_result.rcs_phi_db[0]
-    if theta_count == 1:
-        angle_values = simulation_result.phi_grid_deg[:, 0]
-        return (
-            angle_values,
-            simulation_result.rcs_theta_db[:, 0],
-            simulation_result.rcs_phi_db[:, 0],
-        )
+def _build_2d_cuts(simulation_result: RcsComputationResult) -> tuple[_SweepCut, _SweepCut]:
+    """Return theta-sweep and phi-sweep cuts for 2D plotting."""
+    phi_values_deg = simulation_result.phi_grid_deg[:, 0]
+    theta_values_deg = simulation_result.theta_grid_deg[0]
+    theta_cut_phi_index = _nearest_angle_index(phi_values_deg, 0.0, circular=True)
+    phi_cut_theta_index = _nearest_angle_index(theta_values_deg, 90.0)
 
-    mid_phi_index = phi_count // 2
-    angle_values = simulation_result.theta_grid_deg[mid_phi_index]
-    return (
-        angle_values,
-        simulation_result.rcs_theta_db[mid_phi_index],
-        simulation_result.rcs_phi_db[mid_phi_index],
+    theta_cut = _SweepCut(
+        sweep_axis="theta",
+        angle_values_deg=simulation_result.theta_grid_deg[theta_cut_phi_index].copy(),
+        rcs_theta_db=simulation_result.rcs_theta_db[theta_cut_phi_index].copy(),
+        rcs_phi_db=simulation_result.rcs_phi_db[theta_cut_phi_index].copy(),
+        fixed_axis="phi",
+        fixed_angle_deg=float(simulation_result.phi_grid_deg[theta_cut_phi_index, 0]),
     )
+    phi_cut = _SweepCut(
+        sweep_axis="phi",
+        angle_values_deg=simulation_result.phi_grid_deg[:, phi_cut_theta_index].copy(),
+        rcs_theta_db=simulation_result.rcs_theta_db[:, phi_cut_theta_index].copy(),
+        rcs_phi_db=simulation_result.rcs_phi_db[:, phi_cut_theta_index].copy(),
+        fixed_axis="theta",
+        fixed_angle_deg=float(simulation_result.theta_grid_deg[0, phi_cut_theta_index]),
+    )
+    return theta_cut, phi_cut
+
+
+def _visible_2d_cuts(simulation_result: RcsComputationResult) -> list[_SweepCut]:
+    """Return the sweep cuts that should be rendered for the current result grid."""
+    theta_cut, phi_cut = _build_2d_cuts(simulation_result)
+    visible_cuts: list[_SweepCut] = []
+    if theta_cut.angle_values_deg.size > 1 or phi_cut.angle_values_deg.size == 1:
+        visible_cuts.append(theta_cut)
+    if phi_cut.angle_values_deg.size > 1:
+        visible_cuts.append(phi_cut)
+    return visible_cuts
 
 
 def _expand_full_polar_if_needed(
+    sweep_axis: str,
     angle_values_deg: np.ndarray,
     theta_values_db: np.ndarray,
     phi_values_db: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Mirror 0..180 cuts to a full 0..360 polar display."""
+    """Mirror a full 0..180 theta sweep to a 0..360 polar display."""
+    if sweep_axis != "theta":
+        return angle_values_deg, theta_values_db, phi_values_db
     if angle_values_deg.size < 2:
         return angle_values_deg, theta_values_db, phi_values_db
     if float(np.min(angle_values_deg)) < 0.0 or float(np.max(angle_values_deg)) > 180.0:
         return angle_values_deg, theta_values_db, phi_values_db
+    if not np.isclose(float(angle_values_deg[0]), 0.0) or not np.isclose(float(angle_values_deg[-1]), 180.0):
+        return angle_values_deg, theta_values_db, phi_values_db
 
-    mirrored_angles = 360.0 - angle_values_deg[-2::-1]
-    mirrored_theta = theta_values_db[-2::-1]
-    mirrored_phi = phi_values_db[-2::-1]
+    mirrored_angles = 360.0 - angle_values_deg[-2:0:-1]
+    mirrored_theta = theta_values_db[-2:0:-1]
+    mirrored_phi = phi_values_db[-2:0:-1]
     return (
         np.concatenate([angle_values_deg, mirrored_angles]),
         np.concatenate([theta_values_db, mirrored_theta]),
         np.concatenate([phi_values_db, mirrored_phi]),
     )
+
+
+def _cut_title(cut: _SweepCut) -> str:
+    """Build a concise subplot title for one sweep cut."""
+    return f"{cut.sweep_axis.title()} Sweep ({cut.fixed_axis}={cut.fixed_angle_deg:.0f} deg)"
+
+
+def _build_2d_figure(simulation_result: RcsComputationResult, chart_mode: str, go: Any) -> Any:
+    """Build the 2D sweep figure used by the widget and in-memory API."""
+    from plotly.subplots import make_subplots
+
+    cuts = _visible_2d_cuts(simulation_result)
+    cut_count = len(cuts)
+    subplot_titles = [_cut_title(cut) for cut in cuts]
+
+    if chart_mode == "polar":
+        fig_2d = make_subplots(
+            rows=1,
+            cols=cut_count,
+            specs=[[{"type": "polar"} for _ in cuts]],
+            subplot_titles=subplot_titles,
+        )
+        for column_index, cut in enumerate(cuts, start=1):
+            angle_values, rcs_theta_cut, rcs_phi_cut = _expand_full_polar_if_needed(
+                cut.sweep_axis,
+                cut.angle_values_deg,
+                cut.rcs_theta_db,
+                cut.rcs_phi_db,
+            )
+            fig_2d.add_trace(
+                go.Scatterpolar(
+                    theta=angle_values,
+                    r=rcs_theta_cut,
+                    mode="lines",
+                    name="Theta Component",
+                    line=dict(color=_THETA_COMPONENT_COLOR),
+                    legendgroup="theta-component",
+                    showlegend=column_index == 1,
+                ),
+                row=1,
+                col=column_index,
+            )
+            fig_2d.add_trace(
+                go.Scatterpolar(
+                    theta=angle_values,
+                    r=rcs_phi_cut,
+                    mode="lines",
+                    name="Phi Component",
+                    line=dict(color=_PHI_COMPONENT_COLOR),
+                    legendgroup="phi-component",
+                    showlegend=column_index == 1,
+                ),
+                row=1,
+                col=column_index,
+            )
+        fig_2d.update_polars(angularaxis=dict(direction="counterclockwise", rotation=90))
+        fig_2d.update_layout(title="RCS Sweeps (Polar)")
+        return fig_2d
+
+    fig_2d = make_subplots(rows=1, cols=cut_count, subplot_titles=subplot_titles)
+    for column_index, cut in enumerate(cuts, start=1):
+        fig_2d.add_trace(
+            go.Scatter(
+                x=cut.angle_values_deg,
+                y=cut.rcs_theta_db,
+                mode="lines",
+                name="Theta Component",
+                line=dict(color=_THETA_COMPONENT_COLOR),
+                legendgroup="theta-component",
+                showlegend=column_index == 1,
+            ),
+            row=1,
+            col=column_index,
+        )
+        fig_2d.add_trace(
+            go.Scatter(
+                x=cut.angle_values_deg,
+                y=cut.rcs_phi_db,
+                mode="lines",
+                name="Phi Component",
+                line=dict(color=_PHI_COMPONENT_COLOR),
+                legendgroup="phi-component",
+                showlegend=column_index == 1,
+            ),
+            row=1,
+            col=column_index,
+        )
+        fig_2d.update_xaxes(title_text=f"{cut.sweep_axis.title()} (deg)", row=1, col=column_index)
+        fig_2d.update_yaxes(title_text="RCS (dBsm)", row=1, col=column_index)
+    fig_2d.update_layout(title="RCS Sweeps (X-Y)")
+    return fig_2d
 
 
 def _sample_count(start_deg: float, stop_deg: float, step_deg: float) -> int:
@@ -240,24 +375,7 @@ def build_plotly_figures(
     except ImportError as exc:  # pragma: no cover
         raise ImportError("build_plotly_figures requires plotly.") from exc
 
-    angle_values, rcs_theta_cut, rcs_phi_cut = _build_2d_cut(simulation_result)
-    fig_2d = go.Figure()
-    if chart_mode == "polar":
-        angle_values, rcs_theta_cut, rcs_phi_cut = _expand_full_polar_if_needed(
-            angle_values,
-            rcs_theta_cut,
-            rcs_phi_cut,
-        )
-        fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"))
-        fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi"))
-        fig_2d.update_layout(
-            title="RCS Cut (Polar)",
-            polar=dict(angularaxis=dict(direction="counterclockwise", rotation=90)),
-        )
-    else:
-        fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta"))
-        fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi"))
-        fig_2d.update_layout(title="RCS Cut (X-Y)", xaxis_title="Angle (deg)", yaxis_title="RCS (dBsm)")
+    fig_2d = _build_2d_figure(simulation_result, chart_mode, go)
 
     if mesh_vertices is None or mesh_faces is None:
         mesh_vertices, mesh_faces = _load_mesh_vertices_faces(Path(stl_model_path))
@@ -960,29 +1078,7 @@ def launch_rcs_widget(project_root: str | Path = "."):
 
         with results_output:
             results_output.clear_output(wait=True)
-            angle_values, rcs_theta_cut, rcs_phi_cut = _build_2d_cut(simulation_result)
-
-            fig_2d = go.Figure()
-            if chart_mode_widget.value == "polar":
-                angle_values, rcs_theta_cut, rcs_phi_cut = _expand_full_polar_if_needed(
-                    angle_values,
-                    rcs_theta_cut,
-                    rcs_phi_cut,
-                )
-                fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_theta_cut, mode="lines", name="RCS Theta"))
-                fig_2d.add_trace(go.Scatterpolar(theta=angle_values, r=rcs_phi_cut, mode="lines", name="RCS Phi"))
-                fig_2d.update_layout(
-                    title="RCS Cut (Polar)",
-                    polar=dict(angularaxis=dict(direction="counterclockwise", rotation=90)),
-                )
-            else:
-                fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_theta_cut, mode="lines", name="RCS Theta"))
-                fig_2d.add_trace(go.Scatter(x=angle_values, y=rcs_phi_cut, mode="lines", name="RCS Phi"))
-                fig_2d.update_layout(
-                    title="RCS Cut (X-Y)",
-                    xaxis_title="Angle (deg)",
-                    yaxis_title="RCS (dBsm)",
-                )
+            fig_2d = _build_2d_figure(simulation_result, chart_mode_widget.value, go)
             fig_2d.update_layout(height=620, autosize=True)
 
             surface_x, surface_y, surface_z, rcs_color = _build_rcs_surface_xyz(
